@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 36 40% 94%;
+    --foreground: 30 18% 9%;
+    --card: 40 100% 99%;
+    --card-foreground: 30 18% 9%;
+    --popover: 40 100% 99%;
+    --popover-foreground: 30 18% 9%;
+    --primary: 17 53% 47%;
+    --primary-foreground: 40 100% 98%;
+    --secondary: 32 20% 92%;
+    --secondary-foreground: 30 18% 9%;
+    --muted: 33 18% 90%;
+    --muted-foreground: 32 10% 38%;
+    --accent: 28 24% 88%;
+    --accent-foreground: 30 18% 9%;
+    --destructive: 0 53% 40%;
+    --destructive-foreground: 40 100% 98%;
+    --success: 135 26% 33%;
+    --success-foreground: 40 100% 98%;
+    --warning: 37 65% 47%;
+    --warning-foreground: 30 18% 9%;
+    --border: 32 16% 84%;
+    --input: 32 16% 84%;
+    --ring: 17 53% 47%;
+    --radius: 0.85rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "tnum" 1;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-serif {
+    font-family: Fraunces, Georgia, serif;
+    font-optical-sizing: auto;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
