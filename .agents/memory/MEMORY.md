@@ -1,0 +1,1 @@
+- [Managed artifact workflows](managed-artifact-workflows.md) — stop scaffold-owned services; they cannot be removed through the workflow remover.
