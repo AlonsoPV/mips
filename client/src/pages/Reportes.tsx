@@ -292,7 +292,7 @@ function ReportLibrary() {
 function ReportDetail({ id }: { id: string }) {
   const { qs } = usePeriod();
   const meta = REPORTS.find((r) => r.id === id);
-  const { data, loading, error, reload } = useApi<ReportPayload>(`/api/reports/${id}${qs}`);
+  const { data, loading, error, reload } = useApi<ReportPayload>(meta ? `/api/reports/${id}${qs}` : null);
 
   if (!meta) return <EmptyState title="Reporte no encontrado" body="Ese recorte no está en la biblioteca." />;
   if (loading) return <PageLoading />;

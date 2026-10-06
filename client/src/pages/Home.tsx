@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChannelBadge } from "@/components/channel-badge";
+import { ChannelEvent } from "@/components/channel-event";
+import { ChannelSelector } from "@/components/channel-selector";
 import { ChartCard } from "@/components/chart-card";
-import { FilterBar } from "@/components/filter-bar";
+import { CrossChannelInsight } from "@/components/cross-channel-insight";
 import { HealthStatus } from "@/components/health-status";
-import { Heatmap, type HeatMetric } from "@/components/heatmap";
+import { Heatmap, heatMetricFor, heatMetricLabel } from "@/components/heatmap";
+import { HubFlow } from "@/components/hub-flow";
 import { KpiCard } from "@/components/kpi-card";
 import { PeriodSelector } from "@/components/period-selector";
 import { PriorityCard, type PriorityTone } from "@/components/priority-card";
@@ -12,9 +15,10 @@ import { TrendIndicator } from "@/components/trend-indicator";
 import { EmptyState, PageError, PageLoading } from "@/components/states";
 import { useApi } from "@/hooks/use-api";
 import { usePeriod } from "@/hooks/use-period";
+import { channelForInsight, countWithUnit, type ChannelKey } from "@/lib/channel-config";
 import type { Insight, KpiValue } from "@shared/types";
 import { greetingFor } from "@shared/time";
-import { DOW_FULL, hourMin, num } from "@/lib/format";
+import { DOW_FULL, num } from "@/lib/format";
 
 interface ChannelMetric {
   metric: string;
@@ -69,31 +73,29 @@ const TONE: Record<string, PriorityTone> = {
   info: "info",
 };
 
-const EVENT_TYPE: Record<string, string> = {
-  order: "Pedido Uber",
-  reservation: "Reserva OpenTable",
-  conversation: "WhatsApp",
-  sale: "Venta Míps",
-};
+type HeatChannel = "all" | "uber" | "opentable" | "whatsapp";
 
-const EVENT_STATUS: Record<string, string> = {
-  confirmed: "Confirmado",
-  received: "Recibida",
-  pending: "Necesita atención",
-  failed: "Necesita atención",
-  processing: "En proceso",
-};
-
-const HEAT_FILTERS: { id: HeatMetric; label: string }[] = [
-  { id: "all", label: "Todos" },
-  { id: "uber", label: "Pedidos" },
-  { id: "ot", label: "Reservaciones" },
-  { id: "wa", label: "WhatsApp" },
+const HEAT_OPTIONS: { channel: HeatChannel; sublabel: string }[] = [
+  { channel: "all", sublabel: "Actividad digital" },
+  { channel: "uber", sublabel: "Pedidos" },
+  { channel: "opentable", sublabel: "Reservaciones" },
+  { channel: "whatsapp", sublabel: "Conversaciones" },
 ];
+
+const HEAT_DESCRIPTION: Record<HeatChannel, string> = {
+  all: "Pedidos, reservaciones y conversaciones por día y hora. Son métricas distintas; el total sólo muestra dónde se concentra la actividad.",
+  uber: "Pedidos de Uber Eats por día y hora.",
+  opentable: "Reservaciones de OpenTable por día y hora de visita.",
+  whatsapp: "Conversaciones de WhatsApp por día y hora de inicio.",
+};
+
+function hourWindow(hour: number) {
+  return `${String(hour).padStart(2, "0")}–${String(hour + 2).padStart(2, "0")} h`;
+}
 
 export default function Home() {
   const { qs, range } = usePeriod();
-  const [heatMetric, setHeatMetric] = useState<HeatMetric>("all");
+  const [heatChannel, setHeatChannel] = useState<HeatChannel>("all");
   const summary = useApi<Summary>(`/api/dashboard/summary${qs}`);
   const insights = useApi<Insights>(`/api/dashboard/insights${qs}`);
   const heat = useApi<Heat>(`/api/dashboard/heatmap${qs}`);
@@ -104,7 +106,7 @@ export default function Home() {
   const error = summary.error || insights.error || heat.error || hub.error;
 
   const homeKpis = useMemo(() => {
-    if (!summary.data) return [] as { kpi: KpiValue; to: string }[];
+    if (!summary.data) return [] as { kpi: KpiValue; to: string; channel: ChannelKey }[];
     const { kpis, channels } = summary.data;
     const sales = kpis.find((k) => k.label.startsWith("Ventas digitales"));
     const ticket = kpis.find((k) => k.label === "Ticket promedio");
@@ -116,17 +118,19 @@ export default function Home() {
       deltaPct: ch.deltaPct ?? null,
       unit: "count",
     });
-    const items: { kpi: KpiValue; to: string }[] = [];
-    if (sales) items.push({ kpi: { ...sales, label: "Ventas digitales" }, to: "/ventas" });
+    const items: { kpi: KpiValue; to: string; channel: ChannelKey }[] = [];
+    if (sales) items.push({ kpi: { ...sales, label: "Ventas confirmadas en Míps" }, to: "/reportes/conciliacion", channel: "mips" });
     items.push({
       kpi: toKpi("Pedidos", "Pedidos de Uber Eats recibidos en el periodo. No incluye reservaciones ni conversaciones.", channels.uber_eats),
       to: "/ventas",
+      channel: "uber",
     });
     items.push({
       kpi: toKpi("Reservaciones", "Reservaciones OpenTable con hora de visita en el periodo.", channels.opentable),
       to: "/reservaciones",
+      channel: "opentable",
     });
-    if (ticket) items.push({ kpi: ticket, to: "/ventas" });
+    if (ticket) items.push({ kpi: ticket, to: "/ventas", channel: "uber" });
     return items;
   }, [summary.data]);
 
@@ -144,21 +148,28 @@ export default function Home() {
       uber.data?.growingProducts.find((p) => (p.growthPct ?? 0) > 0) ?? uber.data?.topProducts[0];
     const channels = summary.data?.channels;
     const channelEntries = channels
-      ? [
-          { name: "Pedidos Uber Eats", delta: channels.uber_eats.deltaPct ?? 0, to: "/ventas" },
-          { name: "Reservaciones", delta: channels.opentable.deltaPct ?? 0, to: "/reservaciones" },
-          { name: "WhatsApp", delta: channels.whatsapp.deltaPct ?? 0, to: "/whatsapp" },
-        ].sort((a, b) => b.delta - a.delta)[0]
+      ? (
+          [
+            { channel: "uber", name: "Pedidos Uber Eats", delta: channels.uber_eats.deltaPct ?? 0, to: "/ventas" },
+            { channel: "opentable", name: "Reservaciones OpenTable", delta: channels.opentable.deltaPct ?? 0, to: "/reservaciones" },
+            { channel: "whatsapp", name: "Conversaciones WhatsApp", delta: channels.whatsapp.deltaPct ?? 0, to: "/whatsapp" },
+          ] as { channel: ChannelKey; name: string; delta: number; to: string }[]
+        ).sort((a, b) => b.delta - a.delta)[0]
       : null;
-    const peak = heat.data?.peak;
-    const schedule = peak
-      ? {
-          name: `${DOW_FULL[peak.dow] ?? ""} ${String(peak.hour).padStart(2, "0")}–${String(peak.hour + 2).padStart(2, "0")} h`,
-          to: "#demanda",
-        }
-      : null;
-    return { product, channel: channelEntries, schedule };
-  }, [uber.data, summary.data, heat.data]);
+    return { product, channel: channelEntries };
+  }, [uber.data, summary.data]);
+
+  /** Aportación de cada fuente en la ventana pico: lo que el Hub cruza para señalar la concentración. */
+  const peakBreakdown = useMemo(() => {
+    if (!heat.data) return null;
+    const { peak, cells } = heat.data;
+    const window = cells.filter((c) => c.dow === peak.dow && c.hour >= peak.hour && c.hour < peak.hour + 2);
+    return {
+      uber: window.reduce((s, c) => s + c.uber, 0),
+      opentable: window.reduce((s, c) => s + c.ot, 0),
+      whatsapp: window.reduce((s, c) => s + c.wa, 0),
+    };
+  }, [heat.data]);
 
   if (loading) return <PageLoading />;
   if (error) {
@@ -184,6 +195,9 @@ export default function Home() {
       ? `Hay ${attentionCount} ${attentionCount === 1 ? "situación que requiere" : "situaciones que requieren"} atención.`
       : "Todo está operando normalmente.";
   const peak = heat.data.peak;
+  const heatMetric = heatMetricFor(heatChannel);
+  const activity = summary.data.kpis.find((k) => k.label === "Actividad digital");
+  const { channels } = summary.data;
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -217,7 +231,7 @@ export default function Home() {
         <h2 className="mb-2 font-serif text-lg">Tu restaurante ahora</h2>
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
           {homeKpis.map((item) => (
-            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} />
+            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} channel={item.channel} />
           ))}
         </div>
       </section>
@@ -229,6 +243,7 @@ export default function Home() {
             <PriorityCard
               key={insight.id}
               tone={TONE[insight.priority] ?? "info"}
+              channel={channelForInsight(insight)}
               title={insight.title}
               description={insight.description}
               secondary={insight.comparison ?? insight.metric}
@@ -239,75 +254,71 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
-        <h2 className="font-serif text-lg">Así llega tu negocio</h2>
-        <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-stretch">
-          {(
-            [
-              ["uber_eats", summary.data.channels.uber_eats, "/ventas"],
-              ["opentable", summary.data.channels.opentable, "/reservaciones"],
-              ["whatsapp", summary.data.channels.whatsapp, "/whatsapp"],
-            ] as const
-          ).map(([key, ch, href]) => (
-            <Link
-              key={key}
-              to={href}
-              className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md bg-muted/70 px-3 py-2.5 hover:bg-accent"
-            >
-              <span>
-                <ChannelBadge channel={key} />
-                <p className="mt-1 text-[11px] text-muted-foreground">{ch.metric}</p>
-              </span>
-              <span className="text-right">
-                <span className="block font-serif text-2xl tabular leading-none">{num(ch.value)}</span>
-                <TrendIndicator value={ch.deltaPct} className="text-xs" />
-              </span>
-            </Link>
-          ))}
-        </div>
-        <div className="mt-2 flex items-center justify-center text-[11px] text-muted-foreground">↓ Confirmado en Míps</div>
-        <Link
-          to="/salud"
-          className="mt-1 flex items-center justify-between rounded-md bg-espresso px-3 py-2.5 text-[#F6F1EA] hover:opacity-95"
-        >
-          <ChannelBadge channel="mips" label="Míps POS" />
-          <span className="text-right">
-            <span className="block font-serif text-2xl tabular leading-none">
-              {num(summary.data.channels.mips.value)}
-            </span>
-            <span className="text-[11px] text-[#C9BDB0]">ventas confirmadas</span>
-          </span>
-        </Link>
-      </section>
+      <HubFlow
+        sources={[
+          { channel: "uber", value: channels.uber_eats.value, metric: "pedidos", deltaPct: channels.uber_eats.deltaPct, to: "/ventas" },
+          { channel: "opentable", value: channels.opentable.value, metric: "reservaciones", deltaPct: channels.opentable.deltaPct, to: "/reservaciones" },
+          { channel: "whatsapp", value: channels.whatsapp.value, metric: "conversaciones", deltaPct: channels.whatsapp.deltaPct, to: "/whatsapp" },
+        ]}
+        hub={{ events: activity?.value ?? channels.uber_eats.value + channels.opentable.value + channels.whatsapp.value, deltaPct: activity?.deltaPct, to: "/hub" }}
+        destination={{ value: channels.mips.value, deltaPct: channels.mips.deltaPct, to: "/reportes/conciliacion" }}
+      />
 
       <ChartCard
-        title="Demanda"
-        action={<FilterBar options={HEAT_FILTERS} value={heatMetric} onChange={setHeatMetric} ariaLabel="Filtrar demanda" />}
+        title={`¿Cuándo ocurre la demanda? · ${heatMetricLabel(heatMetric)}`}
+        action={<ChannelSelector options={HEAT_OPTIONS} value={heatChannel} onChange={setHeatChannel} ariaLabel="Fuente de la demanda" />}
       >
-        <div id="demanda">
-          <Heatmap
-            cells={heat.data.cells}
-            metric={heatMetric}
-            peakLabel={`Mayor concentración: ${DOW_FULL[peak.dow]} ${String(peak.hour).padStart(2, "0")}–${String(peak.hour + 2).padStart(2, "0")} h.`}
-          />
+        <div id="demanda" className="scroll-mt-24">
+          <Heatmap cells={heat.data.cells} metric={heatMetric} description={HEAT_DESCRIPTION[heatChannel]} />
+          {peakBreakdown && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <ChannelBadge channel="hub" variant="plain" />
+                <span>
+                  Mayor concentración: <span className="font-medium text-foreground">{DOW_FULL[peak.dow]} {hourWindow(peak.hour)}</span>
+                </span>
+              </span>
+              <span className="hidden h-3 w-px bg-border sm:block" />
+              {(["uber", "opentable", "whatsapp"] as const).map((c) => (
+                <span key={c} className="inline-flex items-center gap-1">
+                  <ChannelBadge channel={c} variant="plain" showLabel={false} />
+                  <span className="tabular text-foreground">{countWithUnit(c, peakBreakdown[c], num(peakBreakdown[c]))}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </ChartCard>
 
       <section className="grid gap-2.5 md:grid-cols-3">
         <h2 className="font-serif text-lg md:col-span-3">Qué está creciendo</h2>
         <GrowthTile
+          channel="uber"
           kind="Producto"
           title={growth.product?.name ?? "Sin producto destacado"}
           delta={growth.product?.growthPct ?? null}
           to="/ventas?focus=productos"
         />
         <GrowthTile
+          channel={growth.channel?.channel ?? "all"}
           kind="Canal"
           title={growth.channel?.name ?? "Canales"}
           delta={growth.channel?.delta ?? null}
           to={growth.channel?.to ?? "/hub"}
         />
-        <GrowthTile kind="Horario" title={growth.schedule?.name ?? "Ventana pico"} to={growth.schedule?.to ?? "#demanda"} />
+        {peakBreakdown && (
+          <CrossChannelInsight
+            tone="opportunity"
+            title={`Tu mayor concentración digital es el ${DOW_FULL[peak.dow].toLowerCase()} ${hourWindow(peak.hour)}`}
+            breakdown={[
+              { channel: "uber", value: peakBreakdown.uber },
+              { channel: "opentable", value: peakBreakdown.opentable },
+              { channel: "whatsapp", value: peakBreakdown.whatsapp },
+            ]}
+            ctaLabel="Analizar horario"
+            to="#demanda"
+          />
+        )}
       </section>
 
       <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
@@ -319,11 +330,7 @@ export default function Home() {
         </div>
         <ul className="mt-2 divide-y">
           {hub.data.recent.slice(0, 5).map((e) => (
-            <li key={e.externalId + e.occurredAt} className="flex items-center gap-3 py-2 text-sm">
-              <span className="w-12 tabular text-muted-foreground">{hourMin(e.occurredAt)}</span>
-              <span className="flex-1">{EVENT_TYPE[e.eventType] ?? e.eventType}</span>
-              <span className="text-muted-foreground">{EVENT_STATUS[e.eventStatus] ?? e.eventStatus}</span>
-            </li>
+            <ChannelEvent key={e.externalId + e.occurredAt} event={e} />
           ))}
         </ul>
       </section>
@@ -332,11 +339,13 @@ export default function Home() {
 }
 
 function GrowthTile({
+  channel,
   kind,
   title,
   delta,
   to,
 }: {
+  channel: ChannelKey;
   kind: string;
   title: string;
   delta?: number | null;
@@ -344,8 +353,11 @@ function GrowthTile({
 }) {
   return (
     <Link to={to} className="rounded-lg border bg-card px-4 py-3 shadow-soft hover:border-primary/40">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{kind}</p>
-      <p className="mt-1 font-serif text-lg leading-snug">{title}</p>
+      <p className="flex items-center gap-1.5">
+        <ChannelBadge channel={channel} size="sm" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{kind}</span>
+      </p>
+      <p className="mt-1.5 font-serif text-lg leading-snug">{title}</p>
       {delta != null && <TrendIndicator value={delta} className="mt-1 block" />}
     </Link>
   );

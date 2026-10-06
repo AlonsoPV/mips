@@ -19,10 +19,14 @@ export interface KpiValue {
   unit?: "currency" | "count" | "percent" | "seconds";
 }
 
+/** Fuente de un insight. "hub" cuando el Hub lo construyó cruzando varias fuentes. */
+export type InsightChannel = ChannelType | "hub" | "all";
+
 export interface Insight {
   id: string;
   type: InsightType;
   priority: InsightPriority;
+  channel?: InsightChannel;
   title: string;
   description: string;
   metric?: string;

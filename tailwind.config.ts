@@ -27,6 +27,16 @@ export default {
         olive: "#3F6B4A",
         amber: "#C4892A",
         merlot: "#9B2F2F",
+        // Identidad por canal. Señalización, no decoración: se usan en texto, icono,
+        // punto de estado y fondos muy suaves (/10). Nunca como color único de reconocimiento.
+        channel: {
+          uber: "#047A3E",
+          opentable: "#B3262F",
+          whatsapp: "#128C7E",
+          mips: "#1F3A5F",
+          hub: "#B85C38",
+          all: "#5C5149",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",

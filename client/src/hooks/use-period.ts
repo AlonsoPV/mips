@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export const RANGES = [
@@ -8,11 +9,47 @@ export const RANGES = [
   { id: "custom", label: "Personalizado" },
 ] as const;
 
+const STORAGE_KEY = "mips.period";
+
+interface StoredPeriod {
+  range: string;
+  from: string;
+  to: string;
+}
+
+function readStored(): StoredPeriod | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredPeriod) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(value: StoredPeriod) {
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/**
+ * Periodo activo. Vive en la URL (?range=…) y se recuerda durante la sesión,
+ * así cambiar de pantalla no regresa a "Hoy" cuando el usuario ya eligió otro corte.
+ */
 export function usePeriod() {
   const [params, setParams] = useSearchParams();
-  const range = params.get("range") || "today";
-  const from = params.get("from") || "";
-  const to = params.get("to") || "";
+  const urlRange = params.get("range");
+  const stored = urlRange ? null : readStored();
+
+  const range = urlRange || stored?.range || "today";
+  const from = params.get("from") || stored?.from || "";
+  const to = params.get("to") || stored?.to || "";
+
+  useEffect(() => {
+    if (urlRange) writeStored({ range: urlRange, from: params.get("from") || "", to: params.get("to") || "" });
+  }, [urlRange, params]);
 
   const qs = (() => {
     const p = new URLSearchParams();
@@ -32,6 +69,7 @@ export function usePeriod() {
       p.delete("from");
       p.delete("to");
     }
+    writeStored({ range: next, from: next === "custom" ? from : "", to: next === "custom" ? to : "" });
     setParams(p);
   }
 
@@ -40,6 +78,7 @@ export function usePeriod() {
     p.set("range", "custom");
     p.set("from", nextFrom);
     p.set("to", nextTo);
+    writeStored({ range: "custom", from: nextFrom, to: nextTo });
     setParams(p);
   }
 

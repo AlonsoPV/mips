@@ -31,6 +31,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "sunday-gap",
       type: "horario",
+      channel: "hub",
       priority: "opportunity",
       title: "Oportunidad de horario",
       description: `Los domingos entre 13:00 y 15:00 concentran ${Math.round(resShare * 100)}% de las reservaciones, pero sólo ${Math.round(uberShare * 100)}% de los pedidos de Uber Eats.`,
@@ -50,6 +51,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "angus-star",
       type: "producto",
+      channel: "uber_eats",
       priority: "opportunity",
       title: "Producto estrella",
       description: `La hamburguesa Angus es de los productos más solicitados en Uber Eats y genera un ticket ${Math.round(lift)}% ${lift >= 0 ? "superior" : "inferior"} al promedio.`,
@@ -67,6 +69,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "ribeye-freq",
       type: "producto",
+      channel: "uber_eats",
       priority: "opportunity",
       title: "Producto de alto ticket",
       description: `El rib eye tiene un ticket asociado alto (${rib.ticket}) con menor frecuencia (${rib.quantity} unidades).`,
@@ -85,6 +88,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "wa-reservations",
       type: "atencion",
+      channel: "whatsapp",
       priority: "attention",
       title: "Atención en WhatsApp",
       description: `Las consultas de reservaciones representan ${Math.round(resPct * 100)}% de las conversaciones de WhatsApp.`,
@@ -101,6 +105,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "uber-errors",
       type: "riesgo",
+      channel: "uber_eats",
       priority: errors > 8 ? "critical" : "attention",
       title: "Riesgo operativo",
       description: `${errors} pedidos de Uber Eats necesitaron reprocesamiento o quedaron en error en el periodo.`,
@@ -121,6 +126,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "thursday-gap",
       type: "horario",
+      channel: "hub",
       priority: "opportunity",
       title: "Horario con menor demanda",
       description: `Los jueves de 18:00 a 20:00 tienen ${drop}% menos demanda digital que el promedio de esa misma ventana.`,
@@ -136,6 +142,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "inactive-customers",
       type: "recurrencia",
+      channel: "hub",
       priority: "opportunity",
       title: "Reactivación",
       description: `${inactivos} clientes identificables no han regresado en más de 45 días.`,
@@ -150,6 +157,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     insights.push({
       id: "hub-health",
       type: "riesgo",
+      channel: "hub",
       priority: health.failed > 5 ? "critical" : "attention",
       title: "Salud del Hub",
       description: `Hay ${health.pending} eventos pendientes y ${health.failed} fallidos. El Hub los monitorea para no perder operación.`,

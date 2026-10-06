@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import type { KpiValue } from "@shared/types";
+import { ChannelBadge } from "@/components/channel-badge";
 import { MetricTooltip } from "@/components/metric-tooltip";
 import { TrendIndicator } from "@/components/trend-indicator";
+import type { ChannelKey } from "@/lib/channel-config";
 import { deltaCopy, formatKpi } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -9,13 +11,21 @@ export function KpiCard({
   kpi,
   to,
   showTrend = true,
+  channel,
 }: {
   kpi: KpiValue;
   to?: string;
   showTrend?: boolean;
+  /** Fuente del dato. Se muestra antes del número para que el origen quede claro primero. */
+  channel?: ChannelKey;
 }) {
   const body = (
     <>
+      {channel && (
+        <div className="mb-1.5">
+          <ChannelBadge channel={channel} size="sm" />
+        </div>
+      )}
       <MetricTooltip label={kpi.label}>{kpi.tooltip}</MetricTooltip>
       <p className="mt-2 font-serif text-3xl tabular tracking-tight md:text-[2rem]">{formatKpi(kpi.value, kpi.unit)}</p>
       {showTrend && (

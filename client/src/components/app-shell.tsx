@@ -1,39 +1,49 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
-  CalendarDays,
   ChevronDown,
   HeartPulse,
   LayoutDashboard,
   Menu,
-  MessageCircle,
   Settings,
   ShoppingBag,
   Sparkles,
   Users,
-  Waypoints,
 } from "lucide-react";
+import { ChannelIcon } from "@/components/channel-icon";
 import { PeriodSelector } from "@/components/period-selector";
+import { PageLoading } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { channelConfig, type ChannelKey } from "@/lib/channel-config";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+
+interface NavChild {
+  to: string;
+  label: string;
+  /** Fuente del dato: pinta el icono del canal y la sub-etiqueta. */
+  channel?: ChannelKey;
+  sub?: string;
+  icon?: typeof LayoutDashboard;
+}
 
 const GROUPS: Array<{
   label: string;
   to?: string;
-  icon: typeof LayoutDashboard;
-  children?: { to: string; label: string; icon: typeof LayoutDashboard }[];
+  icon?: typeof LayoutDashboard;
+  channel?: ChannelKey;
+  children?: NavChild[];
 }> = [
   { to: "/inicio", label: "Inicio", icon: LayoutDashboard },
-  { to: "/hub", label: "Hub", icon: Waypoints },
+  { to: "/hub", label: "Hub", channel: "hub" },
   {
     label: "Operación",
     icon: ShoppingBag,
     children: [
-      { to: "/ventas", label: "Pedidos", icon: ShoppingBag },
-      { to: "/reservaciones", label: "Reservaciones", icon: CalendarDays },
-      { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
+      { to: "/ventas", label: "Pedidos", channel: "uber", sub: "Uber Eats" },
+      { to: "/reservaciones", label: "Reservaciones", channel: "opentable", sub: "OpenTable" },
+      { to: "/whatsapp", label: "WhatsApp", channel: "whatsapp", sub: "Conversaciones" },
     ],
   },
   {
@@ -41,12 +51,18 @@ const GROUPS: Array<{
     icon: Sparkles,
     children: [
       { to: "/marketing", label: "Oportunidades", icon: Sparkles },
-      { to: "/clientes", label: "Clientes", icon: Users },
+      { to: "/clientes", label: "Clientes identificados", icon: Users },
     ],
   },
   { to: "/reportes", label: "Reportes", icon: Activity },
   { to: "/salud", label: "Salud del Hub", icon: HeartPulse },
 ];
+
+function NavGlyph({ icon: Icon, channel, small = false }: { icon?: typeof LayoutDashboard; channel?: ChannelKey; small?: boolean }) {
+  if (channel) return <ChannelIcon channel={channel} size={small ? "sm" : "md"} onDark />;
+  if (Icon) return <Icon className={cn("shrink-0", small ? "h-3.5 w-3.5" : "h-4 w-4")} />;
+  return null;
+}
 
 function navClass(active: boolean) {
   return cn(
@@ -65,7 +81,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
         if (!item.children) {
           return (
             <NavLink key={item.to} to={item.to!} onClick={onNavigate} className={({ isActive }) => navClass(isActive)}>
-              <item.icon className="h-4 w-4 shrink-0" />
+              <NavGlyph icon={item.icon} channel={item.channel} />
               {item.label}
             </NavLink>
           );
@@ -80,7 +96,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
               onClick={() => setOpen((s) => ({ ...s, [item.label]: !expanded }))}
               aria-expanded={expanded}
             >
-              <item.icon className="h-4 w-4 shrink-0" />
+              <NavGlyph icon={item.icon} channel={item.channel} />
               <span className="flex-1 text-left">{item.label}</span>
               <ChevronDown className={cn("h-3.5 w-3.5 transition", expanded && "rotate-180")} />
             </button>
@@ -91,10 +107,17 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
                     key={child.to}
                     to={child.to}
                     onClick={onNavigate}
-                    className={({ isActive }) => navClass(isActive)}
+                    className={({ isActive }) => cn(navClass(isActive), child.sub && "py-1.5")}
                   >
-                    <child.icon className="h-3.5 w-3.5 shrink-0" />
-                    {child.label}
+                    <NavGlyph icon={child.icon} channel={child.channel} small />
+                    <span className="flex flex-col leading-tight">
+                      <span>{child.label}</span>
+                      {child.sub && (
+                        <span className={cn("text-[10px]", child.channel ? channelConfig[child.channel].accentOnDark : "text-[#C9BDB0]")}>
+                          {child.sub}
+                        </span>
+                      )}
+                    </span>
                   </NavLink>
                 ))}
               </div>
@@ -157,7 +180,9 @@ export function AppShell({ restaurantName }: { restaurantName: string }) {
           )}
         </header>
         <main className="flex-1 px-4 py-5 md:px-6 md:py-6">
-          <Outlet />
+          <Suspense fallback={<PageLoading />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

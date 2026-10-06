@@ -1,5 +1,3 @@
-import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
 import { ChartCard } from "@/components/chart-card";
 import { SimpleBar, SimpleLine } from "@/components/charts";
 import { DataTable, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/data-table";
@@ -33,14 +31,7 @@ const KPI_TO: Record<string, string> = {
 
 export default function Ventas() {
   const { qs } = usePeriod();
-  const [params] = useSearchParams();
   const { data, loading, error, reload } = useApi<Uber>(`/api/uber/summary${qs}`);
-
-  useEffect(() => {
-    if (!data) return;
-    const id = params.get("focus") === "productos" ? "productos" : null;
-    if (id) document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [data, params]);
 
   if (loading) return <PageLoading />;
   if (error) return <PageError message={error} onRetry={reload} />;
