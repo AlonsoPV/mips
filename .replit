@@ -14,6 +14,8 @@ run = ["npm", "run", "start"]
 [env]
 PORT = "5000"
 NODE_ENV = "development"
+APP_MODE = "demo"
+ALLOW_RESEED = "true"
 
 [workflows]
 runButton = "Project"

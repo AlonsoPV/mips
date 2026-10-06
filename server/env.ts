@@ -13,7 +13,8 @@ export function env(name: string, fallback?: string): string {
 }
 
 export const isProduction = process.env.NODE_ENV === "production";
-export const demoMode = process.env.APP_MODE === "demo";
+/** Sin APP_MODE=live, la app corre como demo abierta (sin cuentas). */
+export const demoMode = process.env.APP_MODE !== "live";
 export const allowReseed = demoMode && !isProduction && process.env.ALLOW_RESEED === "true";
 export function validateRuntime() {
   if (isProduction && !demoMode && !process.env.DATABASE_URL) throw new Error("DATABASE_URL requerida en producción");

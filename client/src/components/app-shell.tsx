@@ -143,7 +143,7 @@ function Brand() {
   );
 }
 
-export function AppShell({ restaurantName, mode, onLogout }: { restaurantName: string; mode: "demo" | "live"; onLogout: () => Promise<void> }) {
+export function AppShell({ restaurantName, mode }: { restaurantName: string; mode: "demo" | "live" }) {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const withoutPeriod =
@@ -172,7 +172,6 @@ export function AppShell({ restaurantName, mode, onLogout }: { restaurantName: s
             <p className="text-sm font-medium">{restaurantName}</p>
             <p className="text-[11px] text-muted-foreground">{mode === "demo" ? "Demo · Datos simulados" : "Operación del restaurante"}</p>
           </div>
-          {mode === "live" && <Button variant="outline" size="sm" onClick={() => void onLogout()}>Cerrar sesión</Button>}
           {!withoutPeriod && (
             <div className="ml-auto">
               <PeriodSelector />
