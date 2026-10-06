@@ -63,17 +63,13 @@ export function registerRoutes(app: Express) {
     res.json({ ok: true, service: "mips-connect" });
   });
 
-  app.get("/api/auth/me", async (req, res) => {
-    if (!req.session.userId) {
-      res.json({ user: null });
-      return;
-    }
+  app.get("/api/auth/me", async (_req, res) => {
     const restaurant = await restaurantInfo();
     res.json({
       user: {
-        id: req.session.userId,
-        email: req.session.email,
-        restaurantId: req.session.restaurantId,
+        id: "usr_demo",
+        email: "demo@mipsconnect.mx",
+        restaurantId: "rst_demo",
         restaurantName: restaurant?.name ?? "Restaurante Demo",
       },
     });

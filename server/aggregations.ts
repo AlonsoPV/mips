@@ -1,4 +1,4 @@
-import { and, avg, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { and, avg, count, desc, eq, gte, lte, or, sql, sum } from "drizzle-orm";
 import {
   customers,
   incidents,
@@ -90,18 +90,32 @@ export async function dashboardSummary(period: PeriodRange) {
       ),
   ]);
 
-  const [[uberNow], [otNow], [waNow]] = await Promise.all([
+  const [[uberNow], [uberPrev], [otNow], [otPrev], [waNow], [waPrev]] = await Promise.all([
     db.select({ c: count() }).from(orders).where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to))),
+    db.select({ c: count() }).from(orders).where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, previousFrom, previousTo))),
     db.select({ c: count() }).from(reservations).where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to))),
+    db.select({ c: count() }).from(reservations).where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, previousFrom, previousTo))),
     db.select({ c: count() }).from(whatsappConversations).where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, from, to))),
+    db.select({ c: count() }).from(whatsappConversations).where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, previousFrom, previousTo))),
   ]);
 
-  const [[mipsNow]] = await Promise.all([
+  const [[mipsNow], [mipsPrev]] = await Promise.all([
     db
       .select({ c: count() })
       .from(posSales)
       .where(and(eq(posSales.restaurantId, RID), eq(posSales.channelSource, "uber_eats"), inRange(posSales.soldAt, from, to))),
+    db
+      .select({ c: count() })
+      .from(posSales)
+      .where(and(eq(posSales.restaurantId, RID), eq(posSales.channelSource, "uber_eats"), inRange(posSales.soldAt, previousFrom, previousTo))),
   ]);
+
+  const channel = (metric: string, value: number, previous: number) => ({
+    metric,
+    value,
+    previous,
+    deltaPct: deltaPct(value, previous),
+  });
 
   return {
     period: { from: from.toISOString(), to: to.toISOString(), label: period.label },
@@ -118,10 +132,10 @@ export async function dashboardSummary(period: PeriodRange) {
       kpi("Comensales reservados", "Suma de personas en reservaciones OpenTable activas (excluye canceladas y no-show).", Number(coversNow.s ?? 0), Number(coversPrev.s ?? 0)),
     ],
     channels: {
-      uber_eats: { metric: "Pedidos", value: Number(uberNow.c) },
-      opentable: { metric: "Reservaciones", value: Number(otNow.c) },
-      whatsapp: { metric: "Conversaciones", value: Number(waNow.c) },
-      mips: { metric: "Operaciones confirmadas", value: Number(mipsNow.c) },
+      uber_eats: channel("Pedidos", Number(uberNow.c), Number(uberPrev.c)),
+      opentable: channel("Reservaciones", Number(otNow.c), Number(otPrev.c)),
+      whatsapp: channel("Conversaciones", Number(waNow.c), Number(waPrev.c)),
+      mips: channel("Ventas confirmadas", Number(mipsNow.c), Number(mipsPrev.c)),
     },
   };
 }
@@ -509,21 +523,30 @@ export async function customersSummary(period: PeriodRange) {
   const segments: Record<string, number> = {};
   for (const c of all) segments[c.segment] = (segments[c.segment] ?? 0) + 1;
 
+  const toRow = (c: (typeof all)[number]) => ({
+    id: c.id,
+    displayName: c.displayName,
+    channels: c.channelsJson as string[] | null,
+    lastSeenAt: c.lastSeenAt,
+    reservationCount: c.reservationCount,
+    attributedSpend: c.attributedSpend,
+    visitCount: c.visitCount,
+    segment: c.segment,
+    preferences: c.preferencesJson as { mesa?: string; momento?: string; dia?: string } | null,
+  });
+
+  const bySegment = (segment: string, n = 8) =>
+    all
+      .filter((c) => c.segment === segment)
+      .sort((a, b) => b.attributedSpend - a.attributedSpend)
+      .slice(0, n)
+      .map(toRow);
+
   const sample = all
     .filter((c) => (c.channelsJson as string[] | null)?.length)
     .sort((a, b) => b.attributedSpend - a.attributedSpend)
     .slice(0, 12)
-    .map((c) => ({
-      id: c.id,
-      displayName: c.displayName,
-      channels: c.channelsJson,
-      lastSeenAt: c.lastSeenAt,
-      reservationCount: c.reservationCount,
-      attributedSpend: c.attributedSpend,
-      visitCount: c.visitCount,
-      segment: c.segment,
-      preferences: c.preferencesJson,
-    }));
+    .map(toRow);
 
   void from;
   void to;
@@ -537,6 +560,13 @@ export async function customersSummary(period: PeriodRange) {
     ],
     segments,
     sample,
+    lists: {
+      inactivos: bySegment("inactivos"),
+      alto_valor: bySegment("alto_valor"),
+      frecuentes: bySegment("frecuentes"),
+      recurrentes: bySegment("recurrentes"),
+      nuevos: bySegment("nuevos"),
+    },
     disclaimer: "Ejemplo demostrativo. La unificación real depende de identificadores, consentimiento y disponibilidad de datos.",
   };
 }
@@ -595,6 +625,26 @@ export async function hubHealth() {
     .orderBy(desc(integrationEvents.occurredAt))
     .limit(18);
 
+  const attention = await db
+    .select({
+      id: integrationEvents.id,
+      occurredAt: integrationEvents.occurredAt,
+      channel: integrationEvents.channel,
+      eventType: integrationEvents.eventType,
+      externalId: integrationEvents.externalId,
+      eventStatus: integrationEvents.eventStatus,
+      mipsFolio: integrationEvents.mipsFolio,
+    })
+    .from(integrationEvents)
+    .where(
+      and(
+        eq(integrationEvents.restaurantId, RID),
+        or(eq(integrationEvents.eventStatus, "pending"), eq(integrationEvents.eventStatus, "failed")),
+      ),
+    )
+    .orderBy(desc(integrationEvents.occurredAt))
+    .limit(20);
+
   const timeline = await db
     .select()
     .from(syncEvents)
@@ -620,6 +670,7 @@ export async function hubHealth() {
       mips: { ...mips, today: todayMap.mips ?? 0 },
     },
     recent,
+    attention,
     timeline,
     incidents: inc,
   };

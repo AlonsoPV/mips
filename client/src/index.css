@@ -4,20 +4,20 @@
 
 @layer base {
   :root {
-    --background: 36 40% 94%;
-    --foreground: 30 18% 9%;
-    --card: 40 100% 99%;
-    --card-foreground: 30 18% 9%;
-    --popover: 40 100% 99%;
-    --popover-foreground: 30 18% 9%;
-    --primary: 17 53% 47%;
+    --background: 30 14% 96%;
+    --foreground: 24 20% 8%;
+    --card: 40 60% 99%;
+    --card-foreground: 24 20% 8%;
+    --popover: 40 60% 99%;
+    --popover-foreground: 24 20% 8%;
+    --primary: 17 58% 42%;
     --primary-foreground: 40 100% 98%;
-    --secondary: 32 20% 92%;
-    --secondary-foreground: 30 18% 9%;
-    --muted: 33 18% 90%;
-    --muted-foreground: 32 10% 38%;
-    --accent: 28 24% 88%;
-    --accent-foreground: 30 18% 9%;
+    --secondary: 30 12% 93%;
+    --secondary-foreground: 24 20% 8%;
+    --muted: 30 10% 91%;
+    --muted-foreground: 24 10% 32%;
+    --accent: 30 14% 90%;
+    --accent-foreground: 24 20% 8%;
     --destructive: 0 53% 40%;
     --destructive-foreground: 40 100% 98%;
     --success: 135 26% 33%;
@@ -49,8 +49,7 @@
   h2,
   h3,
   .font-serif {
-    font-family: Fraunces, Georgia, serif;
-    font-optical-sizing: auto;
+    font-family: Roboto, ui-sans-serif, system-ui, sans-serif;
   }
 }
 

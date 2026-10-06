@@ -225,7 +225,7 @@ export async function initDb(): Promise<AppDb> {
     await pool.query(CREATE_SQL);
   } else {
     mkdirSync("data", { recursive: true });
-    pglite = new PGlite("data/pglite");
+    pglite = new PGlite(process.env.PGLITE_PATH || "data/pglite");
     await pglite.waitReady;
     db = drizzlePglite(pglite, { schema });
     usingPglite = true;

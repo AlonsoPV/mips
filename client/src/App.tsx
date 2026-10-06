@@ -1,9 +1,8 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/app-shell";
 import { PageLoading } from "@/components/states";
-import { api } from "@/lib/api";
 import Landing from "@/pages/Landing";
 
 const Home = lazy(() => import("@/pages/Home"));
@@ -18,24 +17,8 @@ const Reportes = lazy(() => import("@/pages/Reportes"));
 const Salud = lazy(() => import("@/pages/Salud"));
 const Configuracion = lazy(() => import("@/pages/Configuracion"));
 
-interface Me {
-  user: { email: string; restaurantName: string } | null;
-}
-
 function Protected() {
-  const [me, setMe] = useState<Me | null>(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    api<Me>("/api/auth/me")
-      .then(setMe)
-      .catch(() => setMe({ user: null }))
-      .finally(() => setReady(true));
-  }, []);
-
-  if (!ready) return <PageLoading />;
-  if (!me?.user) return <Navigate to="/" replace />;
-  return <AppShell restaurantName={me.user.restaurantName} />;
+  return <AppShell restaurantName="Restaurante Demo" />;
 }
 
 export default function App() {

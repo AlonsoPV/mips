@@ -12,7 +12,7 @@ export function PeriodSelector() {
           key={r.id}
           size="sm"
           variant={range === r.id ? "default" : "outline"}
-          className={cn(range === r.id && "shadow-none")}
+          className={cn(range === r.id && "shadow-none", r.id === "custom" && "hidden sm:inline-flex")}
           onClick={() => setRange(r.id)}
         >
           {r.label}

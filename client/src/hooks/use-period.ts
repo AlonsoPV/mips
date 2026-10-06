@@ -10,7 +10,7 @@ export const RANGES = [
 
 export function usePeriod() {
   const [params, setParams] = useSearchParams();
-  const range = params.get("range") || "30d";
+  const range = params.get("range") || "today";
   const from = params.get("from") || "";
   const to = params.get("to") || "";
 

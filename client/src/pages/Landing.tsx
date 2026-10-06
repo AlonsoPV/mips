@@ -1,48 +1,7 @@
-import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
 
 export default function Landing() {
-  const navigate = useNavigate();
-  const [email, setEmail] = useState("demo@mipsconnect.mx");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-      navigate("/inicio");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo entrar");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function enter(path: string) {
-    setLoading(true);
-    setError(null);
-    try {
-      if (!password) {
-        setError("Escribe la contraseña demo para continuar.");
-        return;
-      }
-      await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-      navigate(path);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo entrar");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <div className="min-h-screen bg-background">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -59,11 +18,11 @@ export default function Landing() {
             Hoy tu restaurante no necesita más plataformas. Necesita que las que ya utiliza trabajen juntas.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Button size="lg" onClick={() => void enter("/inicio")} disabled={loading}>
-              Explorar mi operación
+            <Button size="lg" asChild>
+              <Link to="/inicio">Explorar mi operación</Link>
             </Button>
-            <Button size="lg" variant="outline" onClick={() => void enter("/hub")} disabled={loading}>
-              Ver cómo funciona el Hub
+            <Button size="lg" variant="outline" asChild>
+              <Link to="/hub">Ver cómo funciona el Hub</Link>
             </Button>
           </div>
           <p className="mt-10 max-w-lg text-sm text-muted-foreground">
@@ -71,28 +30,25 @@ export default function Landing() {
           </p>
         </section>
         <section className="rounded-2xl border bg-card p-8 shadow-soft">
-          <h2 className="font-serif text-2xl">Entrar a la demo</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Usuario de demostración. La contraseña nunca viaja en el frontend embebida.</p>
-          <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-            <div className="space-y-2">
-              <Label htmlFor="email">Correo</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Contraseña</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-            </div>
-            {error && <p className="text-sm text-merlot">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Entrando…" : "Continuar"}
-            </Button>
-          </form>
-          <p className="mt-6 text-xs text-muted-foreground">
-            Usuario: demo@mipsconnect.mx · La contraseña está en las variables de entorno (DEMO_PASSWORD).
-          </p>
-          <Link to="/inicio" className="mt-4 inline-block text-sm text-primary hover:underline">
-            Ya tengo sesión
-          </Link>
+          <h2 className="font-serif text-2xl">Qué vas a ver</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Sin cuentas ni contraseñas. Entra y entiende el restaurante en segundos.</p>
+          <ul className="mt-6 space-y-4 text-sm leading-relaxed">
+            <li>
+              <span className="font-medium">Hoy</span>
+              <p className="text-muted-foreground">Ventas digitales, reservaciones y lo que debes saber.</p>
+            </li>
+            <li>
+              <span className="font-medium">Los tres canales</span>
+              <p className="text-muted-foreground">Uber Eats, OpenTable y WhatsApp, cada uno con su métrica real.</p>
+            </li>
+            <li>
+              <span className="font-medium">El Hub</span>
+              <p className="text-muted-foreground">Cómo llega cada evento a Míps y si hay algo que atender.</p>
+            </li>
+          </ul>
+          <Button className="mt-8 w-full" size="lg" asChild>
+            <Link to="/inicio">Entrar al restaurante demo</Link>
+          </Button>
         </section>
       </main>
     </div>

@@ -17,8 +17,8 @@ Edita `.env`. En local puedes dejar `DATABASE_URL` vacío: la app usa [PGlite](h
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL de Replit. Vacío = PGlite local |
 | `PORT` | Replit lo inyecta. Default `5000` |
-| `SESSION_SECRET` | Secreto de cookie httpOnly |
-| `DEMO_PASSWORD` | Contraseña del usuario demo (nunca en el frontend) |
+| `SESSION_SECRET` | Secreto de cookie (reservado para auth futura) |
+| `DEMO_PASSWORD` | Se usa solo al seedear el usuario demo; la UI no pide login |
 | `ALLOW_RESEED` | `true` para permitir regenerar el seed en UI |
 | `NODE_ENV` | `production` en Autoscale |
 
@@ -51,10 +51,7 @@ npm run dev
 
 Escucha en `0.0.0.0:$PORT` (default 5000).
 
-Credenciales demo:
-
-- Usuario: `demo@mipsconnect.mx`
-- Contraseña: valor de `DEMO_PASSWORD` (en `.env.example`: `MipsDemo2026!`)
+La demo **no pide inicio de sesión**. Abre la URL y usa **Explorar mi operación**.
 
 ## 6. Build
 

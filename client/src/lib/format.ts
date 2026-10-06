@@ -22,6 +22,17 @@ export function pct(n: number | null): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
+export function deltaCopy(current: number, previous: number, unit: "count" | "currency" | "percent" | "seconds" = "count"): string {
+  const diff = current - previous;
+  if (diff === 0) return "Igual que el periodo anterior";
+  const more = diff > 0;
+  const abs = Math.abs(diff);
+  if (unit === "currency") {
+    return `${mxn(abs)} ${more ? "más" : "menos"} que el periodo anterior`;
+  }
+  return `${num(abs)} ${more ? "más" : "menos"} que el periodo anterior`;
+}
+
 export function formatKpi(value: number, unit?: string): string {
   if (unit === "currency") return mxn(value);
   if (unit === "percent") return `${num(value, 1)}%`;

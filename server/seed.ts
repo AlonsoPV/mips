@@ -245,7 +245,7 @@ export async function seedDatabase(force = false): Promise<{ seeded: boolean; re
     const sunday = p.weekday === 0;
     const cancelled = chance(rng, sunday ? 0.09 : 0.045);
     const errorFlag = false;
-    let status: "cancelled" | "confirmed" | "pending" | "failed" = cancelled ? "cancelled" : "confirmed";
+    const status: "cancelled" | "confirmed" | "pending" | "failed" = cancelled ? "cancelled" : "confirmed";
     const nItems = chance(rng, 0.55) ? 1 : chance(rng, 0.8) ? 2 : 3;
     const lines = [];
     for (let k = 0; k < nItems; k++) {
