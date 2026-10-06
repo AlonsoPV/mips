@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
   read_at timestamptz,
   body_preview text
 );
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS replied_at timestamptz;
 CREATE INDEX IF NOT EXISTS wa_msg_conversation_idx ON whatsapp_messages(conversation_id);
 CREATE TABLE IF NOT EXISTS whatsapp_templates (
   id varchar(64) PRIMARY KEY,
@@ -203,6 +204,20 @@ CREATE TABLE IF NOT EXISTS incidents (
   status text NOT NULL
 );
 CREATE INDEX IF NOT EXISTS incidents_restaurant_time_idx ON incidents(restaurant_id, occurred_at);
+CREATE TABLE IF NOT EXISTS auth_sessions (
+ token_hash varchar(64) PRIMARY KEY, user_id varchar(64) NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS connector_health (
+ id varchar(64) PRIMARY KEY, restaurant_id varchar(64) NOT NULL REFERENCES restaurants(id), channel text NOT NULL,
+ checked_at timestamptz NOT NULL, status text NOT NULL, message text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS conversation_stages (
+ id varchar(64) PRIMARY KEY, restaurant_id varchar(64) NOT NULL REFERENCES restaurants(id),
+ conversation_id varchar(64) NOT NULL REFERENCES whatsapp_conversations(id), stage text NOT NULL,
+ occurred_at timestamptz NOT NULL, target_id varchar(64)
+);
+CREATE INDEX IF NOT EXISTS conversation_stages_time_idx ON conversation_stages(restaurant_id, occurred_at);
 CREATE TABLE IF NOT EXISTS session (
   sid varchar PRIMARY KEY,
   sess json NOT NULL,
@@ -217,7 +232,7 @@ export async function initDb(): Promise<AppDb> {
   if (url) {
     pool = new Pool({
       connectionString: url,
-      ssl: isProduction ? { rejectUnauthorized: false } : false,
+      ssl: isProduction ? { rejectUnauthorized: true } : false,
       max: 8,
     });
     db = drizzlePg(pool, { schema });

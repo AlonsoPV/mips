@@ -98,7 +98,7 @@ export const channelConfig: Record<ChannelKey, ChannelConfig> = {
     label: "Míps POS",
     shortLabel: "Míps",
     role: "destination",
-    describes: "Ventas confirmadas y folios",
+    describes: "Ventas conciliadas y folios",
     unit: { singular: "venta confirmada", plural: "ventas confirmadas" },
     icon: Receipt,
     accent: "text-channel-mips",

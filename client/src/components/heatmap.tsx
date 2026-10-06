@@ -56,7 +56,7 @@ export function Heatmap({
   showLegend?: boolean;
   onSelectHour?: (dow: number, hour: number) => void;
 }) {
-  const hours = Array.from({ length: 15 }, (_, i) => i + 8);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
   const map = new Map(cells.map((c) => [`${c.dow}-${c.hour}`, c]));
   const max = Math.max(1, ...cells.map((c) => valueFor(c, metric)));
   const channel = METRIC_CHANNEL[metric];

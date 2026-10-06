@@ -36,7 +36,6 @@ const GROUPS: Array<{
   children?: NavChild[];
 }> = [
   { to: "/inicio", label: "Inicio", icon: LayoutDashboard },
-  { to: "/hub", label: "Hub", channel: "hub" },
   {
     label: "Operación",
     icon: ShoppingBag,
@@ -128,7 +127,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
       <div className="mt-auto pt-6">
         <NavLink to="/configuracion" onClick={onNavigate} className={({ isActive }) => navClass(isActive)}>
           <Settings className="h-4 w-4" />
-          Configuración
+          Integraciones
         </NavLink>
       </div>
     </nav>
@@ -144,11 +143,11 @@ function Brand() {
   );
 }
 
-export function AppShell({ restaurantName }: { restaurantName: string }) {
+export function AppShell({ restaurantName, mode, onLogout }: { restaurantName: string; mode: "demo" | "live"; onLogout: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
-  const livePage =
-    pathname === "/inicio" || pathname === "/hub" || pathname === "/salud" || pathname === "/configuracion";
+  const withoutPeriod =
+    pathname === "/inicio" || pathname === "/salud" || pathname === "/configuracion" || pathname === "/hub" || pathname.startsWith("/clientes") || pathname === "/reportes/clientes";
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[220px_1fr]">
@@ -171,9 +170,10 @@ export function AppShell({ restaurantName }: { restaurantName: string }) {
           </Sheet>
           <div>
             <p className="text-sm font-medium">{restaurantName}</p>
-            <p className="text-[11px] text-muted-foreground">Demo · Datos simulados</p>
+            <p className="text-[11px] text-muted-foreground">{mode === "demo" ? "Demo · Datos simulados" : "Operación del restaurante"}</p>
           </div>
-          {!livePage && (
+          {mode === "live" && <Button variant="outline" size="sm" onClick={() => void onLogout()}>Cerrar sesión</Button>}
+          {!withoutPeriod && (
             <div className="ml-auto">
               <PeriodSelector />
             </div>

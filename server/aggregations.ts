@@ -1,5 +1,7 @@
 import { and, avg, count, desc, eq, gte, lte, or, sql, sum } from "drizzle-orm";
 import {
+  connectorHealth,
+  conversationStages,
   customers,
   incidents,
   integrationEvents,
@@ -15,12 +17,13 @@ import {
   whatsappMessages,
   whatsappTemplates,
 } from "../shared/schema";
+import { startOfMexicoDay } from "../shared/time";
 import type { KpiValue } from "../shared/types";
-import { adaptersFor } from "./adapters";
+import { demoMode } from "./env";
 import { getDb } from "./db";
 import { deltaPct, type PeriodRange } from "./period";
 
-const RID = "rst_demo";
+import { restaurantId } from "./context";
 
 function kpi(
   label: string,
@@ -36,9 +39,16 @@ function inRange(column: Date | unknown, from: Date, to: Date) {
   return and(gte(column as any, from), lte(column as any, to));
 }
 
+function reconciledOrder() {
+  return sql`(${orders.status} = 'confirmed' and ${orders.cancelled} = false and ${orders.mipsFolio} is not null and exists (
+    select 1 from ${posSales} where ${posSales.restaurantId} = ${orders.restaurantId}
+    and ${posSales.orderId} = ${orders.id} and ${posSales.mipsFolio} = ${orders.mipsFolio} and ${posSales.amount} = ${orders.amount}
+  ))`;
+}
+
 export async function restaurantInfo() {
   const db = getDb();
-  const [row] = await db.select().from(restaurants).where(eq(restaurants.id, RID)).limit(1);
+  const [row] = await db.select().from(restaurants).where(eq(restaurants.id, restaurantId())).limit(1);
   return row;
 }
 
@@ -47,19 +57,19 @@ export async function dashboardSummary(period: PeriodRange) {
   const { from, to, previousFrom, previousTo } = period;
 
   const [[eventsNow], [eventsPrev]] = await Promise.all([
-    db.select({ c: count() }).from(integrationEvents).where(and(eq(integrationEvents.restaurantId, RID), inRange(integrationEvents.occurredAt, from, to))),
-    db.select({ c: count() }).from(integrationEvents).where(and(eq(integrationEvents.restaurantId, RID), inRange(integrationEvents.occurredAt, previousFrom, previousTo))),
+    db.select({ c: count() }).from(integrationEvents).where(and(eq(integrationEvents.restaurantId, restaurantId()), inRange(integrationEvents.occurredAt, from, to))),
+    db.select({ c: count() }).from(integrationEvents).where(and(eq(integrationEvents.restaurantId, restaurantId()), inRange(integrationEvents.occurredAt, previousFrom, previousTo))),
   ]);
 
   const [[salesNow], [salesPrev]] = await Promise.all([
     db
       .select({ c: count(), s: sum(orders.amount) })
       .from(orders)
-      .where(and(eq(orders.restaurantId, RID), eq(orders.status, "confirmed"), inRange(orders.orderedAt, from, to))),
+      .where(and(eq(orders.restaurantId, restaurantId()), reconciledOrder(), inRange(orders.orderedAt, from, to))),
     db
       .select({ c: count(), s: sum(orders.amount) })
       .from(orders)
-      .where(and(eq(orders.restaurantId, RID), eq(orders.status, "confirmed"), inRange(orders.orderedAt, previousFrom, previousTo))),
+      .where(and(eq(orders.restaurantId, restaurantId()), reconciledOrder(), inRange(orders.orderedAt, previousFrom, previousTo))),
   ]);
 
   const sales = Number(salesNow.s ?? 0);
@@ -73,7 +83,7 @@ export async function dashboardSummary(period: PeriodRange) {
       .from(reservations)
       .where(
         and(
-          eq(reservations.restaurantId, RID),
+          eq(reservations.restaurantId, restaurantId()),
           inRange(reservations.reservedFor, from, to),
           sql`${reservations.status} not in ('cancelled','no_show')`,
         ),
@@ -83,7 +93,7 @@ export async function dashboardSummary(period: PeriodRange) {
       .from(reservations)
       .where(
         and(
-          eq(reservations.restaurantId, RID),
+          eq(reservations.restaurantId, restaurantId()),
           inRange(reservations.reservedFor, previousFrom, previousTo),
           sql`${reservations.status} not in ('cancelled','no_show')`,
         ),
@@ -91,23 +101,23 @@ export async function dashboardSummary(period: PeriodRange) {
   ]);
 
   const [[uberNow], [uberPrev], [otNow], [otPrev], [waNow], [waPrev]] = await Promise.all([
-    db.select({ c: count() }).from(orders).where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to))),
-    db.select({ c: count() }).from(orders).where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, previousFrom, previousTo))),
-    db.select({ c: count() }).from(reservations).where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to))),
-    db.select({ c: count() }).from(reservations).where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, previousFrom, previousTo))),
-    db.select({ c: count() }).from(whatsappConversations).where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, from, to))),
-    db.select({ c: count() }).from(whatsappConversations).where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, previousFrom, previousTo))),
+    db.select({ c: count() }).from(orders).where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to))),
+    db.select({ c: count() }).from(orders).where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, previousFrom, previousTo))),
+    db.select({ c: count() }).from(reservations).where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to))),
+    db.select({ c: count() }).from(reservations).where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, previousFrom, previousTo))),
+    db.select({ c: count() }).from(whatsappConversations).where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappConversations.startedAt, from, to))),
+    db.select({ c: count() }).from(whatsappConversations).where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappConversations.startedAt, previousFrom, previousTo))),
   ]);
 
   const [[mipsNow], [mipsPrev]] = await Promise.all([
     db
       .select({ c: count() })
-      .from(posSales)
-      .where(and(eq(posSales.restaurantId, RID), eq(posSales.channelSource, "uber_eats"), inRange(posSales.soldAt, from, to))),
+      .from(orders)
+      .where(and(eq(orders.restaurantId, restaurantId()), reconciledOrder(), inRange(orders.orderedAt, from, to))),
     db
       .select({ c: count() })
-      .from(posSales)
-      .where(and(eq(posSales.restaurantId, RID), eq(posSales.channelSource, "uber_eats"), inRange(posSales.soldAt, previousFrom, previousTo))),
+      .from(orders)
+      .where(and(eq(orders.restaurantId, restaurantId()), reconciledOrder(), inRange(orders.orderedAt, previousFrom, previousTo))),
   ]);
 
   const channel = (metric: string, value: number, previous: number) => ({
@@ -122,7 +132,7 @@ export async function dashboardSummary(period: PeriodRange) {
     kpis: [
       kpi("Actividad digital", "Eventos relevantes de Uber Eats, OpenTable y WhatsApp en el periodo.", Number(eventsNow.c), Number(eventsPrev.c)),
       kpi(
-        "Ventas digitales confirmadas",
+        "Ventas digitales conciliadas",
         "Ventas provenientes de canales digitales que pudieron relacionarse con un folio de Míps.",
         sales,
         salesP,
@@ -135,7 +145,7 @@ export async function dashboardSummary(period: PeriodRange) {
       uber_eats: channel("Pedidos", Number(uberNow.c), Number(uberPrev.c)),
       opentable: channel("Reservaciones", Number(otNow.c), Number(otPrev.c)),
       whatsapp: channel("Conversaciones", Number(waNow.c), Number(waPrev.c)),
-      mips: channel("Ventas confirmadas", Number(mipsNow.c), Number(mipsPrev.c)),
+      mips: channel("Ventas conciliadas", Number(mipsNow.c), Number(mipsPrev.c)),
     },
   };
 }
@@ -150,17 +160,17 @@ export async function demandHeatmap(period: PeriodRange) {
     db
       .select({ dow: dowExpr(orders.orderedAt), hour: hourExpr(orders.orderedAt), c: count() })
       .from(orders)
-      .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to)))
+      .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to)))
       .groupBy(dowExpr(orders.orderedAt), hourExpr(orders.orderedAt)),
     db
       .select({ dow: dowExpr(reservations.reservedFor), hour: hourExpr(reservations.reservedFor), c: count() })
       .from(reservations)
-      .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to)))
+      .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to)))
       .groupBy(dowExpr(reservations.reservedFor), hourExpr(reservations.reservedFor)),
     db
       .select({ dow: dowExpr(whatsappConversations.startedAt), hour: hourExpr(whatsappConversations.startedAt), c: count() })
       .from(whatsappConversations)
-      .where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, from, to)))
+      .where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappConversations.startedAt, from, to)))
       .groupBy(dowExpr(whatsappConversations.startedAt), hourExpr(whatsappConversations.startedAt)),
   ]);
 
@@ -182,7 +192,7 @@ export async function demandHeatmap(period: PeriodRange) {
   let max = 1;
   let peak = { dow: 0, hour: 14, total: 0 };
   for (let dow = 0; dow < 7; dow++) {
-    for (let hour = 8; hour <= 22; hour++) {
+    for (let hour = 0; hour < 24; hour++) {
       const v = map.get(key(dow, hour)) ?? { uber: 0, ot: 0, wa: 0 };
       const total = v.uber + v.ot + v.wa;
       if (total > max) max = total;
@@ -194,7 +204,7 @@ export async function demandHeatmap(period: PeriodRange) {
   return { cells: normalized, peak, max };
 }
 
-export async function uberSummary(period: PeriodRange) {
+export async function uberSummary(period: PeriodRange, productLimit = 12) {
   const db = getDb();
   const { from, to, previousFrom, previousTo } = period;
 
@@ -203,15 +213,16 @@ export async function uberSummary(period: PeriodRange) {
       .select({
         orders: count(),
         sales: sum(orders.amount),
+        sourceSales: sql<number>`coalesce(sum(case when ${orders.status} = 'confirmed' and not ${orders.cancelled} then ${orders.amount} else 0 end), 0)`.mapWith(Number),
         cancelled: sql<number>`sum(case when ${orders.cancelled} then 1 else 0 end)`.mapWith(Number),
         errors: sql<number>`sum(case when ${orders.errorFlag} then 1 else 0 end)`.mapWith(Number),
       })
       .from(orders)
-      .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, a, b)));
+      .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, a, b)));
     const [conf] = await db
       .select({ c: count(), s: sum(orders.amount) })
       .from(orders)
-      .where(and(eq(orders.restaurantId, RID), eq(orders.status, "confirmed"), inRange(orders.orderedAt, a, b)));
+      .where(and(eq(orders.restaurantId, restaurantId()), reconciledOrder(), inRange(orders.orderedAt, a, b)));
     return { ...row, confirmed: Number(conf.c), confirmedSales: Number(conf.s ?? 0) };
   };
 
@@ -223,9 +234,9 @@ export async function uberSummary(period: PeriodRange) {
 
   const dayExpr = sql<string>`to_char(date_trunc('day', ${orders.orderedAt} at time zone 'America/Mexico_City'), 'YYYY-MM-DD')`;
   const byDay = await db
-    .select({ day: dayExpr, sales: sum(orders.amount), orders: count() })
+    .select({ day: dayExpr, sales: sql<string>`coalesce(sum(case when ${reconciledOrder()} then ${orders.amount} else 0 end), 0)`, orders: count() })
     .from(orders)
-    .where(and(eq(orders.restaurantId, RID), eq(orders.status, "confirmed"), inRange(orders.orderedAt, from, to)))
+    .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to)))
     .groupBy(dayExpr)
     .orderBy(dayExpr);
 
@@ -233,7 +244,7 @@ export async function uberSummary(period: PeriodRange) {
   const byHour = await db
     .select({ hour: hourExpr, c: count() })
     .from(orders)
-    .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to)))
+    .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to)))
     .groupBy(hourExpr)
     .orderBy(hourExpr);
 
@@ -247,10 +258,10 @@ export async function uberSummary(period: PeriodRange) {
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
     .innerJoin(products, eq(orderItems.productId, products.id))
-    .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to), eq(orders.cancelled, false)))
+    .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to), reconciledOrder()))
     .groupBy(products.id, products.name)
     .orderBy(desc(sum(orderItems.lineTotal)))
-    .limit(12);
+    .limit(productLimit);
 
   const topPrev = await db
     .select({
@@ -262,8 +273,19 @@ export async function uberSummary(period: PeriodRange) {
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
     .innerJoin(products, eq(orderItems.productId, products.id))
-    .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, previousFrom, previousTo), eq(orders.cancelled, false)))
+    .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, previousFrom, previousTo), reconciledOrder()))
     .groupBy(products.id, products.name);
+
+  const productOrders = db.selectDistinct({
+    productId: orderItems.productId,
+    orderId: orders.id,
+    amount: orders.amount,
+  }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.id))
+    .where(and(eq(orders.restaurantId, restaurantId()), reconciledOrder(), inRange(orders.orderedAt, from, to))).as("product_orders");
+  const associatedTickets = await db.select({ productId: productOrders.productId, ticket: avg(productOrders.amount), orderCount: count() })
+    .from(productOrders).groupBy(productOrders.productId);
+  const countMap = new Map(associatedTickets.map((row) => [row.productId, Number(row.orderCount)]));
+  const ticketMap = new Map(associatedTickets.map((row) => [row.productId, Math.round(Number(row.ticket ?? 0))]));
 
   const prevMap = new Map(topPrev.map((p) => [p.productId, p]));
   const growth = top.map((p) => {
@@ -273,7 +295,8 @@ export async function uberSummary(period: PeriodRange) {
       ...p,
       quantity: Number(p.quantity ?? 0),
       sales: Number(p.sales ?? 0),
-      ticket: Number(p.quantity) ? Math.round(Number(p.sales) / Number(p.quantity)) : 0,
+      ticket: ticketMap.get(p.productId) ?? 0,
+      orderCount: countMap.get(p.productId) ?? 0,
       growthPct: prevSales ? ((Number(p.sales) - prevSales) / prevSales) * 100 : null,
     };
   });
@@ -283,7 +306,7 @@ export async function uberSummary(period: PeriodRange) {
     .from(orderModifiers)
     .innerJoin(orderItems, eq(orderModifiers.orderItemId, orderItems.id))
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
-    .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to)))
+    .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to)))
     .groupBy(orderModifiers.name)
     .orderBy(desc(count()))
     .limit(8);
@@ -291,7 +314,7 @@ export async function uberSummary(period: PeriodRange) {
   const cancels = await db
     .select({ reason: orders.cancelReason, c: count() })
     .from(orders)
-    .where(and(eq(orders.restaurantId, RID), eq(orders.cancelled, true), inRange(orders.orderedAt, from, to)))
+    .where(and(eq(orders.restaurantId, restaurantId()), eq(orders.cancelled, true), inRange(orders.orderedAt, from, to)))
     .groupBy(orders.cancelReason)
     .orderBy(desc(count()));
 
@@ -299,7 +322,7 @@ export async function uberSummary(period: PeriodRange) {
     .select({ sales: sum(orderItems.lineTotal) })
     .from(orderItems)
     .innerJoin(orders, eq(orderItems.orderId, orders.id))
-    .where(and(eq(orders.restaurantId, RID), inRange(orders.orderedAt, from, to), eq(orders.cancelled, false)))
+    .where(and(eq(orders.restaurantId, restaurantId()), inRange(orders.orderedAt, from, to), reconciledOrder()))
     .groupBy(orderItems.productId)
     .orderBy(desc(sum(orderItems.lineTotal)));
 
@@ -311,11 +334,12 @@ export async function uberSummary(period: PeriodRange) {
   return {
     kpis: [
       kpi("Pedidos", "Pedidos de Uber Eats recibidos durante el periodo seleccionado.", Number(nowS.orders), Number(prevS.orders)),
-      kpi("Ventas confirmadas", "Pedidos confirmados y vinculados a un folio de Míps.", nowS.confirmedSales, prevS.confirmedSales, "currency"),
+      kpi("Ventas conciliadas", "Pedidos confirmados y vinculados a un folio de Míps.", nowS.confirmedSales, prevS.confirmedSales, "currency"),
       kpi("Ticket promedio", "Venta confirmada dividida entre pedidos confirmados.", ticket, ticketP, "currency"),
       kpi("Cancelación", "Porcentaje de pedidos Uber Eats cancelados.", Math.round(cancelRate * 1000) / 10, Number(prevS.orders) ? Math.round((Number(prevS.cancelled) / Number(prevS.orders)) * 1000) / 10 : 0, "percent"),
       kpi("Operaciones con error", "Pedidos que requirieron reproceso o quedaron en error.", Number(nowS.errors), Number(prevS.errors)),
     ],
+    reconciliation: { sourceConfirmedSales: Number(nowS.sourceSales), reconciledSales: nowS.confirmedSales, pendingSales: Number(nowS.sourceSales) - nowS.confirmedSales },
     byDay: byDay.map((d) => ({ day: d.day, sales: Number(d.sales ?? 0), orders: Number(d.orders) })),
     byHour: byHour.map((h) => ({ hour: Number(h.hour), orders: Number(h.c) })),
     topProducts: growth,
@@ -344,7 +368,7 @@ export async function opentableSummary(period: PeriodRange) {
         noshow: sql<number>`sum(case when ${reservations.status} = 'no_show' then 1 else 0 end)`.mapWith(Number),
       })
       .from(reservations)
-      .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, a, b)));
+      .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, a, b)));
     return row;
   };
   const nowS = await stats(from, to);
@@ -354,7 +378,7 @@ export async function opentableSummary(period: PeriodRange) {
   const byDay = await db
     .select({ day: dayExpr, c: count(), covers: sum(reservations.partySize) })
     .from(reservations)
-    .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to)))
+    .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to)))
     .groupBy(dayExpr)
     .orderBy(dayExpr);
 
@@ -363,13 +387,13 @@ export async function opentableSummary(period: PeriodRange) {
   const heat = await db
     .select({ dow: dowExpr, hour: hourExpr, c: count() })
     .from(reservations)
-    .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to)))
+    .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to)))
     .groupBy(dowExpr, hourExpr);
 
   const sizeRows = await db
     .select({ size: reservations.partySize, c: count() })
     .from(reservations)
-    .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to)))
+    .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to)))
     .groupBy(reservations.partySize);
 
   const buckets = { "2": 0, "3-4": 0, "5-6": 0, "7+": 0 };
@@ -386,7 +410,7 @@ export async function opentableSummary(period: PeriodRange) {
   const leads = await db
     .select({ lead: leadExpr, c: count() })
     .from(reservations)
-    .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to)))
+    .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to)))
     .groupBy(leadExpr);
 
   const leadBuckets = { "Mismo día": 0, "1–2 días": 0, "3–7 días": 0, "7+ días": 0 };
@@ -402,7 +426,7 @@ export async function opentableSummary(period: PeriodRange) {
   const states = await db
     .select({ status: reservations.status, c: count() })
     .from(reservations)
-    .where(and(eq(reservations.restaurantId, RID), inRange(reservations.reservedFor, from, to)))
+    .where(and(eq(reservations.restaurantId, restaurantId()), inRange(reservations.reservedFor, from, to)))
     .groupBy(reservations.status);
 
   const returning = await db
@@ -411,7 +435,7 @@ export async function opentableSummary(period: PeriodRange) {
     .innerJoin(customers, eq(reservations.customerId, customers.id))
     .where(
       and(
-        eq(reservations.restaurantId, RID),
+        eq(reservations.restaurantId, restaurantId()),
         inRange(reservations.reservedFor, from, to),
         sql`${customers.visitCount} > 1`,
       ),
@@ -423,7 +447,7 @@ export async function opentableSummary(period: PeriodRange) {
       kpi("Comensales", "Suma de tamaño de mesa.", Number(nowS.covers ?? 0), Number(prevS.covers ?? 0)),
       kpi("Tamaño promedio de mesa", "Personas promedio por reservación.", Math.round(Number(nowS.avgSize ?? 0) * 10) / 10, Math.round(Number(prevS.avgSize ?? 0) * 10) / 10),
       kpi("Cancelaciones", "Reservaciones canceladas.", Number(nowS.cancelled), Number(prevS.cancelled)),
-      kpi("No-show", "Reservaciones marcadas como no-show en el dataset demo.", Number(nowS.noshow), Number(prevS.noshow)),
+      kpi("No-show", "Reservaciones marcadas como no-show en los registros.", Number(nowS.noshow), Number(prevS.noshow)),
     ],
     byDay: byDay.map((d) => ({ day: d.day, reservations: Number(d.c), covers: Number(d.covers ?? 0) })),
     heatmap: heat.map((h) => ({ dow: Number(h.dow), hour: Number(h.hour), count: Number(h.c) })),
@@ -447,7 +471,7 @@ export async function whatsappSummary(period: PeriodRange) {
         converted: sql<number>`sum(case when ${whatsappConversations.converted} then 1 else 0 end)`.mapWith(Number),
       })
       .from(whatsappConversations)
-      .where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, a, b)));
+      .where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappConversations.startedAt, a, b)));
     return row;
   };
   const nowS = await stats(from, to);
@@ -460,20 +484,21 @@ export async function whatsappSummary(period: PeriodRange) {
     })
     .from(whatsappMessages)
     .innerJoin(whatsappConversations, eq(whatsappMessages.conversationId, whatsappConversations.id))
-    .where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, from, to)));
+    .where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappMessages.sentAt, from, to)));
 
   const [msgPrev] = await db
     .select({
       sent: sql<number>`sum(case when ${whatsappMessages.direction} = 'out' then 1 else 0 end)`.mapWith(Number),
+      read: sql<number>`sum(case when ${whatsappMessages.readAt} is not null then 1 else 0 end)`.mapWith(Number),
     })
     .from(whatsappMessages)
     .innerJoin(whatsappConversations, eq(whatsappMessages.conversationId, whatsappConversations.id))
-    .where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, previousFrom, previousTo)));
+    .where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappMessages.sentAt, previousFrom, previousTo)));
 
   const intents = await db
     .select({ intent: whatsappConversations.intent, c: count() })
     .from(whatsappConversations)
-    .where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, from, to)))
+    .where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappConversations.startedAt, from, to)))
     .groupBy(whatsappConversations.intent)
     .orderBy(desc(count()));
 
@@ -481,11 +506,23 @@ export async function whatsappSummary(period: PeriodRange) {
   const byHour = await db
     .select({ hour: hourExpr, c: count() })
     .from(whatsappConversations)
-    .where(and(eq(whatsappConversations.restaurantId, RID), inRange(whatsappConversations.startedAt, from, to)))
+    .where(and(eq(whatsappConversations.restaurantId, restaurantId()), inRange(whatsappConversations.startedAt, from, to)))
     .groupBy(hourExpr)
     .orderBy(hourExpr);
 
-  const templates = await db.select().from(whatsappTemplates).where(eq(whatsappTemplates.restaurantId, RID));
+  const templates = await db.select({
+    name: whatsappTemplates.name,
+    sent: count(),
+    delivered: sql<number>`count(*) filter (where ${whatsappMessages.deliveredAt} is not null)`.mapWith(Number),
+    read: sql<number>`count(*) filter (where ${whatsappMessages.readAt} is not null)`.mapWith(Number),
+    replied: sql<number>`count(*) filter (where ${whatsappMessages.repliedAt} is not null)`.mapWith(Number),
+  }).from(whatsappMessages)
+    .innerJoin(whatsappConversations, eq(whatsappMessages.conversationId, whatsappConversations.id))
+    .innerJoin(whatsappTemplates, eq(whatsappMessages.templateId, whatsappTemplates.id))
+    .where(and(eq(whatsappConversations.restaurantId, restaurantId()), eq(whatsappTemplates.restaurantId, restaurantId()), eq(whatsappMessages.direction, "out"), inRange(whatsappMessages.sentAt, from, to)))
+    .groupBy(whatsappTemplates.id, whatsappTemplates.name);
+  const stageCounts = await db.select({ stage: conversationStages.stage, count: sql<number>`count(distinct ${conversationStages.conversationId})`.mapWith(Number) })
+    .from(conversationStages).where(and(eq(conversationStages.restaurantId, restaurantId()), inRange(conversationStages.occurredAt, from, to))).groupBy(conversationStages.stage);
 
   const withIntent = Number(nowS.c);
   const converted = Number(nowS.converted);
@@ -493,28 +530,27 @@ export async function whatsappSummary(period: PeriodRange) {
     kpis: [
       kpi("Conversaciones", "Hilos de WhatsApp iniciados en el periodo. No son ventas.", Number(nowS.c), Number(prevS.c)),
       kpi("Clientes únicos", "Conversaciones con identificador de cliente compatible.", Number(nowS.uniqueC), Number(prevS.uniqueC)),
-      kpi("Tiempo medio de primera respuesta", "Métrica demo de primera respuesta del restaurante.", Math.round(Number(nowS.avgResp ?? 0)), Math.round(Number(prevS.avgResp ?? 0)), "seconds"),
+      kpi("Tiempo medio de primera respuesta", "Tiempo observado de primera respuesta del restaurante.", Math.round(Number(nowS.avgResp ?? 0)), Math.round(Number(prevS.avgResp ?? 0)), "seconds"),
       kpi("Mensajes enviados", "Mensajes de salida en el periodo.", Number(msgNow.sent ?? 0), Number(msgPrev.sent ?? 0)),
-      kpi("Mensajes leídos", "Mensajes con marca de lectura en el dataset demo.", Number(msgNow.read ?? 0), 0),
+      kpi("Mensajes leídos", "Mensajes con marca de lectura en los registros.", Number(msgNow.read ?? 0), Number(msgPrev.read ?? 0)),
       kpi("Solicitudes convertidas", "Conversiones explícitamente relacionadas (reservación o pedido).", converted, Number(prevS.converted)),
     ],
     intents: intents.map((i) => ({ intent: i.intent, count: Number(i.c) })),
     byHour: byHour.map((h) => ({ hour: Number(h.hour), conversations: Number(h.c) })),
     funnel: {
       conversacion: withIntent,
-      intencion: withIntent,
-      solicitud: Math.round(withIntent * 0.46),
       conversion: converted,
     },
+    observedStages: stageCounts,
+    templatesScope: "messages_sent_in_period",
     templates,
     disclaimer: "Las métricas reales dependerán de las capacidades y permisos de WhatsApp Business API.",
   };
 }
 
-export async function customersSummary(period: PeriodRange) {
+export async function customersSummary() {
   const db = getDb();
-  const { from, to } = period;
-  const all = await db.select().from(customers).where(eq(customers.restaurantId, RID));
+  const all = await db.select().from(customers).where(eq(customers.restaurantId, restaurantId()));
   const identifiable = all.length;
   const recurrentes = all.filter((c) => c.visitCount >= 2 && c.segment !== "inactivos").length;
   const nuevos = all.filter((c) => c.segment === "nuevos").length;
@@ -548,16 +584,15 @@ export async function customersSummary(period: PeriodRange) {
     .slice(0, 12)
     .map(toRow);
 
-  void from;
-  void to;
   return {
     kpis: [
-      kpi("Clientes identificables", "Personas con identificador compatible en el dataset demo.", identifiable, identifiable),
+      kpi("Clientes identificables", "Personas con identificador compatible en los registros.", identifiable, identifiable),
       kpi("Recurrentes", "Clientes con más de una visita atribuida.", recurrentes, recurrentes),
       kpi("Nuevos", "Clientes en segmento nuevos.", nuevos, nuevos),
       kpi("Frecuencia promedio", "Visitas promedio por cliente identificable.", Math.round(freq * 10) / 10, Math.round(freq * 10) / 10),
       kpi("Valor acumulado atribuido", "Gasto atribuido cuando existe identificador compatible.", spend, spend, "currency"),
     ],
+    scope: "cumulative" as const,
     segments,
     sample,
     lists: {
@@ -567,47 +602,48 @@ export async function customersSummary(period: PeriodRange) {
       recurrentes: bySegment("recurrentes"),
       nuevos: bySegment("nuevos"),
     },
-    disclaimer: "Ejemplo demostrativo. La unificación real depende de identificadores, consentimiento y disponibilidad de datos.",
+    disclaimer: "Vista acumulada: no cambia con el periodo. La unificación real depende de identificadores, consentimiento y disponibilidad de datos.",
   };
 }
 
 export async function customerDetail(id: string) {
   const db = getDb();
-  const [c] = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
+  const [c] = await db.select().from(customers).where(and(eq(customers.id, id), eq(customers.restaurantId, restaurantId()))).limit(1);
   if (!c) return null;
-  const rsv = await db.select().from(reservations).where(eq(reservations.customerId, id)).limit(8);
-  const ords = await db.select().from(orders).where(eq(orders.customerId, id)).limit(8);
+  const rsv = await db.select().from(reservations).where(and(eq(reservations.customerId, id), eq(reservations.restaurantId, restaurantId()))).orderBy(desc(reservations.reservedFor)).limit(8);
+  const ords = await db.select().from(orders).where(and(eq(orders.customerId, id), eq(orders.restaurantId, restaurantId()))).orderBy(desc(orders.orderedAt)).limit(8);
   return { ...c, reservations: rsv, orders: ords };
 }
 
 export async function hubHealth() {
   const db = getDb();
-  const adapters = adaptersFor(RID);
-  const [uber, ot, wa, mips] = await Promise.all([
-    adapters.uberEats.healthCheck(),
-    adapters.openTable.healthCheck(),
-    adapters.whatsapp.healthCheck(),
-    adapters.mips.healthCheck(),
-  ]);
+  const heartbeats = await db.select().from(connectorHealth).where(eq(connectorHealth.restaurantId, restaurantId()));
+  const state = (channel: string) => {
+    const beat = heartbeats.find(h => h.channel === channel);
+    if (demoMode) return { status: "idle", lastEventAt: null, message: "Simulado; no mide conectividad real", checkedAt: null };
+    if (!beat) return { status: "idle", lastEventAt: null, message: "Sin heartbeat del conector", checkedAt: null };
+    const stale = Date.now() - beat.checkedAt.getTime() > 120000;
+    return { status: stale ? "attention" : beat.status, lastEventAt: null, checkedAt: beat.checkedAt, message: stale ? "Heartbeat vencido (más de 2 minutos)" : beat.message };
+  };
+  const [uber, ot, wa, mips] = ["uber_eats", "opentable", "whatsapp", "mips"].map(state);
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const [processed] = await db.select({ c: count() }).from(integrationEvents).where(eq(integrationEvents.restaurantId, RID));
+  const todayStart = startOfMexicoDay(new Date());
+  const [processed] = await db.select({ c: count() }).from(integrationEvents).where(and(eq(integrationEvents.restaurantId, restaurantId()), eq(integrationEvents.eventStatus, "confirmed")));
   const [pending] = await db
     .select({ c: count() })
     .from(integrationEvents)
-    .where(and(eq(integrationEvents.restaurantId, RID), eq(integrationEvents.eventStatus, "pending")));
+    .where(and(eq(integrationEvents.restaurantId, restaurantId()), eq(integrationEvents.eventStatus, "pending")));
   const [failed] = await db
     .select({ c: count() })
     .from(integrationEvents)
-    .where(and(eq(integrationEvents.restaurantId, RID), eq(integrationEvents.eventStatus, "failed")));
+    .where(and(eq(integrationEvents.restaurantId, restaurantId()), eq(integrationEvents.eventStatus, "failed")));
   const todayEvents = await db
     .select({
       channel: integrationEvents.channel,
       c: count(),
     })
     .from(integrationEvents)
-    .where(and(eq(integrationEvents.restaurantId, RID), gte(integrationEvents.occurredAt, todayStart)))
+    .where(and(eq(integrationEvents.restaurantId, restaurantId()), gte(integrationEvents.occurredAt, todayStart)))
     .groupBy(integrationEvents.channel);
 
   const recent = await db
@@ -621,7 +657,7 @@ export async function hubHealth() {
       mipsFolio: integrationEvents.mipsFolio,
     })
     .from(integrationEvents)
-    .where(eq(integrationEvents.restaurantId, RID))
+    .where(eq(integrationEvents.restaurantId, restaurantId()))
     .orderBy(desc(integrationEvents.occurredAt))
     .limit(18);
 
@@ -638,7 +674,7 @@ export async function hubHealth() {
     .from(integrationEvents)
     .where(
       and(
-        eq(integrationEvents.restaurantId, RID),
+        eq(integrationEvents.restaurantId, restaurantId()),
         or(eq(integrationEvents.eventStatus, "pending"), eq(integrationEvents.eventStatus, "failed")),
       ),
     )
@@ -648,21 +684,23 @@ export async function hubHealth() {
   const timeline = await db
     .select()
     .from(syncEvents)
-    .where(eq(syncEvents.restaurantId, RID))
+    .where(eq(syncEvents.restaurantId, restaurantId()))
     .orderBy(desc(syncEvents.occurredAt))
     .limit(12);
 
-  const inc = await db.select().from(incidents).where(eq(incidents.restaurantId, RID)).orderBy(desc(incidents.occurredAt));
+  const inc = await db.select().from(incidents).where(eq(incidents.restaurantId, restaurantId())).orderBy(desc(incidents.occurredAt));
 
   const todayMap: Record<string, number> = {};
   for (const t of todayEvents) todayMap[t.channel] = Number(t.c);
 
   return {
-    availability: 99.9,
+    mode: demoMode ? "demo" : "live",
+    monitoring: "authenticated_heartbeat",
+    availability: null, // No uptime monitoring exists in this demo.
     processed: Number(processed.c),
     pending: Number(pending.c),
     failed: Number(failed.c),
-    lastSyncAgoSeconds: 18,
+    lastSyncAgoSeconds: timeline.length ? Math.max(0, Math.floor((Date.now() - timeline[0]!.occurredAt.getTime()) / 1000)) : null,
     integrations: {
       uber_eats: { ...uber, today: todayMap.uber_eats ?? 0 },
       opentable: { ...ot, today: todayMap.opentable ?? 0 },
@@ -689,7 +727,7 @@ export async function hubEvents(limit = 40) {
       mipsFolio: integrationEvents.mipsFolio,
     })
     .from(integrationEvents)
-    .where(eq(integrationEvents.restaurantId, RID))
+    .where(eq(integrationEvents.restaurantId, restaurantId()))
     .orderBy(desc(integrationEvents.occurredAt))
     .limit(limit);
 }
@@ -709,7 +747,7 @@ export async function reportData(report: string, period: PeriodRange) {
     case "productos":
       return uberSummary(period);
     case "clientes":
-      return customersSummary(period);
+      return customersSummary();
     case "conciliacion":
       return hubHealth();
     default:

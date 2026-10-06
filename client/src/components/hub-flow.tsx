@@ -24,17 +24,23 @@ export function HubFlow({
   sources,
   hub,
   destination,
+  title = "Así llega tu negocio",
+  hubCaption = "eventos recibidos",
+  destinationCaption = "operaciones confirmadas en Míps",
   className,
 }: {
   sources: HubFlowSource[];
   hub: { events: number; deltaPct?: number | null; to: string };
   destination: { value: number; deltaPct?: number | null; to: string };
+  title?: string;
+  hubCaption?: string;
+  destinationCaption?: string;
   className?: string;
 }) {
   return (
     <section className={cn("rounded-lg border bg-card px-4 py-3.5 shadow-soft", className)}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-serif text-lg">Así llega tu negocio</h2>
+        <h2 className="font-serif text-lg">{title}</h2>
         <p className="text-[11px] text-muted-foreground">Fuentes → Hub → Míps POS</p>
       </div>
 
@@ -61,7 +67,7 @@ export function HubFlow({
                     </span>
                     <span className="text-right">
                       <span className="block font-serif text-xl tabular leading-none">{num(s.value)}</span>
-                      <TrendIndicator value={s.deltaPct} className="text-[11px]" />
+                      {s.deltaPct !== undefined && <TrendIndicator value={s.deltaPct} className="text-[11px]" />}
                     </span>
                   </Link>
                 </li>
@@ -92,8 +98,8 @@ export function HubFlow({
             </span>
             <span className="mt-3 block font-serif text-3xl tabular leading-none">{num(hub.events)}</span>
             <span className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-              eventos recibidos
-              <TrendIndicator value={hub.deltaPct} className="text-[11px]" />
+              {hubCaption}
+              {hub.deltaPct !== undefined && <TrendIndicator value={hub.deltaPct} className="text-[11px]" />}
             </span>
           </Link>
         </div>
@@ -110,8 +116,10 @@ export function HubFlow({
             <ChannelBadge channel="mips" variant="plain" size="md" onDark />
             <span className="mt-3 block font-serif text-3xl tabular leading-none">{num(destination.value)}</span>
             <span className="mt-1 flex items-center gap-2 text-xs text-[#C5D3E8]">
-              operaciones confirmadas en Míps
-              <TrendIndicator value={destination.deltaPct} className="text-[11px] text-[#C5D3E8]" />
+              {destinationCaption}
+              {destination.deltaPct !== undefined && (
+                <TrendIndicator value={destination.deltaPct} className="text-[11px] text-[#C5D3E8]" />
+              )}
             </span>
           </Link>
         </div>

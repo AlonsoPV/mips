@@ -65,6 +65,7 @@ export function usePeriod() {
   function setRange(next: string) {
     const p = new URLSearchParams(params);
     p.set("range", next);
+    p.delete("offset");
     if (next !== "custom") {
       p.delete("from");
       p.delete("to");
@@ -76,6 +77,7 @@ export function usePeriod() {
   function setCustom(nextFrom: string, nextTo: string) {
     const p = new URLSearchParams(params);
     p.set("range", "custom");
+    p.delete("offset");
     p.set("from", nextFrom);
     p.set("to", nextTo);
     writeStored({ range: "custom", from: nextFrom, to: nextTo });

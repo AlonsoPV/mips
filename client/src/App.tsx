@@ -1,13 +1,12 @@
 import { lazy, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppShell } from "@/components/app-shell";
+import { SessionGate } from "@/components/session-gate";
 import { ScrollManager } from "@/components/scroll-manager";
 import Landing from "@/pages/Landing";
 
 const loaders = {
   Home: () => import("@/pages/Home"),
-  Hub: () => import("@/pages/Hub"),
   Ventas: () => import("@/pages/Ventas"),
   Reservaciones: () => import("@/pages/Reservaciones"),
   Whatsapp: () => import("@/pages/Whatsapp"),
@@ -20,7 +19,6 @@ const loaders = {
 };
 
 const Home = lazy(loaders.Home);
-const Hub = lazy(loaders.Hub);
 const Ventas = lazy(loaders.Ventas);
 const Reservaciones = lazy(loaders.Reservaciones);
 const Whatsapp = lazy(loaders.Whatsapp);
@@ -43,10 +41,6 @@ function usePrefetchPages() {
   }, []);
 }
 
-function Protected() {
-  return <AppShell restaurantName="Restaurante Demo" />;
-}
-
 export default function App() {
   usePrefetchPages();
 
@@ -56,9 +50,9 @@ export default function App() {
         <ScrollManager />
         <Routes>
           <Route path="/" element={<Landing />} />
-          <Route element={<Protected />}>
+          <Route element={<SessionGate />}>
             <Route path="/inicio" element={<Home />} />
-            <Route path="/hub" element={<Hub />} />
+            <Route path="/hub" element={<Navigate to="/salud" replace />} />
             <Route path="/ventas" element={<Ventas />} />
             <Route path="/reservaciones" element={<Reservaciones />} />
             <Route path="/whatsapp" element={<Whatsapp />} />

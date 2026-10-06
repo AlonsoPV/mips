@@ -59,38 +59,9 @@ Sustituir `MockWhatsAppAdapter`:
 
 ## Míps (conector local)
 
-No hay `.exe` en esta demo. Hay un stub:
+No hay ejecutable local ni llamadas al POS activadas. Ya existe recepción HTTPS autenticada de eventos con contrato v1: pedido → registro transaccional → confirmación explícita enviada por el conector Míps. Un pedido pendiente nunca obtiene un folio inventado.
 
-`POST /api/connector/events`
-
-```json
-{
-  "event_id": "string",
-  "channel": "uber_eats",
-  "event_type": "order",
-  "payload_version": "1",
-  "payload": {},
-  "created_at": "ISO-8601"
-}
-```
-
-Respuesta:
-
-```json
-{ "status": "processed", "mips_folio": "M-123456", "error": null }
-```
-
-Arquitectura prevista:
-
-```
-Cloud Hub → HTTPS autenticado → conector local → Míps (TXT / CSV / HTTPS interno)
-```
-
-Campos mínimos del payload hacia el conector: `event_id`, `channel`, `event_type`, `payload_version`, `payload`, `created_at`.
-
-El conector responde `received | processed | failed` + `mips_folio` + `error`.
-
-Fuentes alternativas mientras no exista el .exe: exportación TXT/CSV de Míps subida a un endpoint de ingestión, o HTTPS si el sitio ya lo expone.
+El contrato implementado, ejemplos, idempotencia y provisión están en [PRODUCCION.md](PRODUCCION.md). `POST /api/connector/events` exige token por restaurante/canal. La adaptación de TXT/CSV o API del POS queda pendiente del contrato autorizado de la instalación.
 
 ## Qué no hacer
 
@@ -101,10 +72,10 @@ Fuentes alternativas mientras no exista el .exe: exportación TXT/CSV de Míps s
 
 ## Pendientes hacia productivo
 
-- OAuth / API keys por restaurante y canal.
-- Autenticación real (más allá del usuario demo).
-- Cola de webhooks e idempotencia (`external_id`).
-- Multi-sucursal.
+- OAuth y adaptadores específicos de cada proveedor (ya hay claves de ingreso por restaurante/canal).
+- Operación de identidad a escala: recuperación de cuenta, MFA/SSO y limitación de intentos distribuida, si el despliegue lo requiere.
+- Transporte duradero y reintentos desde el conector externo; el receptor ya aplica idempotencia y transacciones.
+- Gestión de grupos de sucursales; hoy cada usuario pertenece a un restaurante aislado.
 - Consentimiento y avisos de privacidad para Customer 360.
 - Observabilidad (alertas reales, no solo timeline demo).
 - El conector local firmado y actualizable.

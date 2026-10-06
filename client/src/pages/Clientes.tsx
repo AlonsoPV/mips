@@ -1,15 +1,18 @@
+import { CustomerDirectory } from "@/components/customer-directory";
 import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChannelBadge } from "@/components/channel-badge";
+import { ChartCard } from "@/components/chart-card";
+import { SimpleDonut } from "@/components/charts";
 import { DataTable, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/data-table";
 import { FilterBar } from "@/components/filter-bar";
 import { KpiCard } from "@/components/kpi-card";
 import { MetricTooltip } from "@/components/metric-tooltip";
 import { PageIntro } from "@/components/page-intro";
 import { PriorityCard } from "@/components/priority-card";
+import { ShareBars } from "@/components/share-bars";
 import { EmptyState, PageError, PageLoading } from "@/components/states";
 import { useApi } from "@/hooks/use-api";
-import { usePeriod } from "@/hooks/use-period";
 import { ago, mxn, num } from "@/lib/format";
 import type { KpiValue } from "@shared/types";
 
@@ -60,7 +63,7 @@ function hash(qs: string, id: string, extra?: string) {
 }
 
 export default function Clientes() {
-  const { qs } = usePeriod();
+  const qs = "";
   const [params, setParams] = useSearchParams();
   const segment = (FILTERS.some((f) => f.id === params.get("segment")) ? params.get("segment") : "all") as SegmentId;
   const { data, loading, error, reload } = useApi<Cust>(`/api/customers/summary${qs}`);
@@ -84,7 +87,7 @@ export default function Clientes() {
 
   if (loading) return <PageLoading />;
   if (error) return <PageError message={error} onRetry={reload} />;
-  if (!data) return <EmptyState title="Sin clientes" body="No hay identificadores compatibles en este periodo." />;
+  if (!data) return <EmptyState title="Sin clientes" body="No hay identificadores compatibles en el dataset." />;
 
   const pick = (label: string) => data.kpis.find((k) => k.label === label);
   const identifiable = pick("Clientes identificables");
@@ -112,6 +115,7 @@ export default function Clientes() {
   if (inactivosN > 0) {
     priorities.push({
       tone: "opportunity" as const,
+      channel: "hub" as const,
       title: `${num(inactivosN)} ${inactivosN === 1 ? "cliente no ha" : "clientes no han"} vuelto`,
       description: "Llevan más de 45 días sin visita atribuida. Sirve para una reactivación, con consentimiento.",
       ctaLabel: "Ver quiénes",
@@ -121,6 +125,7 @@ export default function Clientes() {
   if (alto > 0) {
     priorities.push({
       tone: "opportunity" as const,
+      channel: "hub" as const,
       title: `Hay ${num(alto)} de alto valor`,
       description: "Gasto y visitas altos. Conviene cuidarlos en mesa y en el canal digital.",
       ctaLabel: "Ver fichas",
@@ -130,6 +135,7 @@ export default function Clientes() {
   if (priorities.length < 3 && frecuentes > 0) {
     priorities.push({
       tone: "info" as const,
+      channel: "hub" as const,
       title: `${num(frecuentes)} vienen seguido`,
       description: "Ya conocen el restaurante. Útil para experiencias o horarios que ya les funcionan.",
       ctaLabel: "Ver frecuentes",
@@ -139,6 +145,7 @@ export default function Clientes() {
   if (priorities.length < 3 && (nuevos?.value ?? 0) > 0) {
     priorities.push({
       tone: "info" as const,
+      channel: "hub" as const,
       title: `${num(nuevos!.value)} mesas nuevas identificables`,
       description: "Primera visita con identificador. Todavía no son recurrencia.",
       ctaLabel: "Ver nuevos",
@@ -164,16 +171,19 @@ export default function Clientes() {
     <div className="mx-auto max-w-6xl space-y-5">
       <PageIntro
         question="¿Quién ya nos conoce?"
-        title="Clientes"
+        channel="hub"
+        title="Clientes identificados · acumulado"
         headline={headline}
         aside={<MetricTooltip label="Sobre esta vista">{data.disclaimer}</MetricTooltip>}
       />
 
+      <p className="text-sm text-muted-foreground">Visitas, gasto y segmentos del historial completo. Esta vista no utiliza el periodo de ventas.</p>
+
       <section>
-        <h2 className="mb-2 font-serif text-lg">Tus clientes ahora</h2>
+        <h2 className="mb-2 font-serif text-lg">Clientes · acumulado histórico</h2>
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {mainKpis.map((item) => (
-            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} showTrend={false} />
+          {mainKpis.map((item, i) => (
+            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} channel="hub" showTrend={false} featured={i === 0} />
           ))}
         </div>
       </section>
@@ -186,6 +196,34 @@ export default function Clientes() {
           ))}
         </div>
       </section>
+
+      <div className="grid gap-2.5 lg:grid-cols-2">
+        <ChartCard title="Cómo se parten" channel="hub">
+          <SimpleDonut
+            compact
+            channel="hub"
+            data={Object.entries(data.segments).map(([id, value]) => ({
+              name: segmentLabel[id] ?? id,
+              value,
+            }))}
+            nameKey="name"
+            valueKey="value"
+            center={{
+              value: num(Object.values(data.segments).reduce((s, n) => s + n, 0)),
+              label: "Identificables",
+            }}
+          />
+        </ChartCard>
+        <ChartCard title="Tamaño de cada grupo" channel="hub">
+          <ShareBars
+            channel="hub"
+            items={Object.entries(data.segments).map(([id, value]) => ({
+              label: segmentLabel[id] ?? id,
+              value,
+            }))}
+          />
+        </ChartCard>
+      </div>
 
       <section id="lista" className="scroll-mt-24 rounded-lg border bg-card px-4 py-3.5 shadow-soft">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -219,7 +257,7 @@ export default function Clientes() {
                   <TableCell>
                     <Link to={`/clientes/${c.id}`} className="flex flex-wrap gap-1">
                       {(c.channels ?? []).slice(0, 3).map((ch) => (
-                        <ChannelBadge key={ch} channel={ch} />
+                        <ChannelBadge key={ch} channel={ch} variant="plain" />
                       ))}
                     </Link>
                   </TableCell>
@@ -238,6 +276,7 @@ export default function Clientes() {
           Ver oportunidades →
         </Link>
       </section>
+      <CustomerDirectory />
     </div>
   );
 }

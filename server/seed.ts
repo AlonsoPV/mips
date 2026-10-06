@@ -1,8 +1,10 @@
-import { hash } from "bcryptjs";
-import { count } from "drizzle-orm";
-import { DEMO_EMAIL, DEMO_RESTAURANT_ID, DEMO_RESTAURANT_NAME } from "../shared/types";
+import { count, ne } from "drizzle-orm";
+import { DEMO_RESTAURANT_ID, DEMO_RESTAURANT_NAME } from "../shared/types";
 import { mexicoDate, mexicoParts } from "../shared/time";
 import {
+  authSessions,
+  connectorHealth,
+  conversationStages,
   channels,
   customers,
   incidents,
@@ -21,8 +23,8 @@ import {
   whatsappTemplates,
 } from "../shared/schema";
 import { CANCEL_REASONS, FIRST_NAMES, LAST_NAMES, MODIFIERS, PREFERENCES, PRODUCT_CATALOG, WA_TEMPLATES } from "./catalog";
+import { demoMode } from "./env";
 import { getDb } from "./db";
-import { env } from "./env";
 import { chance, id, int, mulberry32, pick, pickWeighted, type Rng } from "./rng";
 
 const SEED = 20261005;
@@ -85,13 +87,19 @@ async function insertBatches<T extends Record<string, unknown>>(
 }
 
 export async function seedDatabase(force = false): Promise<{ seeded: boolean; restaurantId: string }> {
+  if (!demoMode) throw new Error("Seed deshabilitado en modo live");
   const db = getDb();
+  const [other] = await db.select({ n: count() }).from(restaurants).where(ne(restaurants.id, DEMO_RESTAURANT_ID));
+  if (other.n > 0) throw new Error("Seed rechazado: la base contiene otros restaurantes");
   const [existing] = await db.select({ c: count() }).from(restaurants);
   if (existing && existing.c > 0 && !force) {
     return { seeded: false, restaurantId: DEMO_RESTAURANT_ID };
   }
 
   if (force) {
+    await db.delete(authSessions);
+    await db.delete(connectorHealth);
+    await db.delete(conversationStages);
     await db.delete(orderModifiers);
     await db.delete(orderItems);
     await db.delete(whatsappMessages);
@@ -112,22 +120,12 @@ export async function seedDatabase(force = false): Promise<{ seeded: boolean; re
 
   const rng = mulberry32(SEED);
   const now = new Date();
-  const password = env("DEMO_PASSWORD", "MipsDemo2026!");
-  const passwordHash = await hash(password, 10);
 
   await db.insert(restaurants).values({
     id: DEMO_RESTAURANT_ID,
     name: DEMO_RESTAURANT_NAME,
     timezone: "America/Mexico_City",
     currency: "MXN",
-  });
-
-  await db.insert(users).values({
-    id: "usr_demo",
-    restaurantId: DEMO_RESTAURANT_ID,
-    email: DEMO_EMAIL,
-    passwordHash,
-    role: "owner",
   });
 
   const channelRows = [

@@ -1,90 +1,63 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChannelBadge } from "@/components/channel-badge";
-import { DataTable, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/data-table";
-import { FilterBar } from "@/components/filter-bar";
+import { ChannelEventTable } from "@/components/channel-event-table";
+import { ChannelSelector } from "@/components/channel-selector";
+import { ChannelSourceCard } from "@/components/channel-source-card";
+import { ChartCard } from "@/components/chart-card";
+import { FunnelStrip } from "@/components/funnel-strip";
 import { HealthStatus } from "@/components/health-status";
 import { KpiCard } from "@/components/kpi-card";
 import { PageIntro } from "@/components/page-intro";
-import { PriorityCard } from "@/components/priority-card";
-import { StatusIndicator, integrationLabel, integrationLevel } from "@/components/status-indicator";
+import { PriorityCard, type PriorityTone } from "@/components/priority-card";
+import { integrationLevel } from "@/components/status-indicator";
 import { EmptyState, PageError, PageLoading } from "@/components/states";
 import { useApi } from "@/hooks/use-api";
+import { STATUS_CHANNELS, channelConfig, toChannelKey, type ChannelKey } from "@/lib/channel-config";
 import { hourMin, num } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { KpiValue } from "@shared/types";
+
+interface HubEvent {
+  occurredAt: string;
+  channel: string;
+  eventType: string;
+  externalId: string;
+  eventStatus: string;
+  mipsFolio: string | null;
+}
 
 interface Health {
   processed: number;
   pending: number;
   failed: number;
-  lastSyncAgoSeconds: number;
-  integrations: Record<
-    string,
-    { status: string; lastEventAt: string | null; message: string; today: number }
-  >;
-  recent: Array<{
-    occurredAt: string;
-    channel: string;
-    eventType: string;
-    externalId: string;
-    eventStatus: string;
-    mipsFolio: string | null;
-  }>;
-  attention?: Array<{
-    occurredAt: string;
-    channel: string;
-    eventType: string;
-    externalId: string;
-    eventStatus: string;
-    mipsFolio: string | null;
-  }>;
+  lastSyncAgoSeconds: number | null;
+  integrations: Record<string, { status: string; lastEventAt: string | null; message: string; today: number }>;
+  recent: HubEvent[];
+  attention?: HubEvent[];
   timeline: { occurredAt: string; channel: string; message: string; severity: string }[];
   incidents: { occurredAt: string; title: string; description: string; status: string; channel: string }[];
 }
 
-const CHANNELS = [
-  { key: "uber_eats", to: "/ventas", metric: "Pedidos" },
-  { key: "opentable", to: "/reservaciones", metric: "Reservaciones" },
-  { key: "whatsapp", to: "/whatsapp", metric: "Conversaciones" },
-  { key: "mips", to: "/reportes/conciliacion", metric: "Confirmados" },
-] as const;
+type StatusKey = (typeof STATUS_CHANNELS)[number];
 
-const FILTERS = [
-  { id: "attention", label: "Por atender" },
-  { id: "uber_eats", label: "Pedidos" },
-  { id: "opentable", label: "Reservaciones" },
-  { id: "whatsapp", label: "WhatsApp" },
-  { id: "mips", label: "Míps" },
-] as const;
-
-const WHAT: Record<string, string> = {
-  order: "Pedido Uber",
-  reservation: "Reserva OpenTable",
-  conversation: "Conversación WhatsApp",
-  sale: "Venta Míps",
+/** Clave de la API y destino de cada canal conectado. */
+const CHANNEL_META: Record<StatusKey, { api: string; to: string; metric: string }> = {
+  uber: { api: "uber_eats", to: "/ventas", metric: "Pedidos" },
+  opentable: { api: "opentable", to: "/reservaciones", metric: "Reservaciones" },
+  whatsapp: { api: "whatsapp", to: "/whatsapp", metric: "Conversaciones" },
+  mips: { api: "mips", to: "/reportes/conciliacion", metric: "Confirmados" },
 };
 
-const STATE: Record<string, string> = {
-  confirmed: "Confirmado",
-  received: "Recibida",
-  pending: "Necesita atención",
-  failed: "Necesita atención",
-  processing: "En proceso",
-};
+type Filter = "all" | StatusKey;
 
-const CHANNEL_PAGE: Record<string, string> = {
-  uber_eats: "/ventas",
-  opentable: "/reservaciones",
-  whatsapp: "/whatsapp",
-  mips: "/reportes/conciliacion",
-};
-
-const CHANNEL_NAME: Record<string, string> = {
-  uber_eats: "Uber Eats",
-  opentable: "OpenTable",
-  whatsapp: "WhatsApp",
-  mips: "Míps",
-};
+const FILTERS: { channel: Filter; sublabel: string }[] = [
+  { channel: "all", sublabel: "Por atender" },
+  { channel: "uber", sublabel: "Pedidos" },
+  { channel: "opentable", sublabel: "Reservaciones" },
+  { channel: "whatsapp", sublabel: "Conversaciones" },
+  { channel: "mips", sublabel: "Confirmados" },
+];
 
 function kpi(label: string, tooltip: string, value: number): KpiValue {
   return { label, tooltip, value, previousValue: value, deltaPct: 0, unit: "count" };
@@ -94,19 +67,29 @@ function needsAttention(status: string) {
   return status === "failed" || status === "pending";
 }
 
+interface Priority {
+  tone: PriorityTone;
+  channel: ChannelKey;
+  title: string;
+  description: string;
+  secondary?: string;
+  ctaLabel: string;
+  to: string;
+}
+
 export default function Salud() {
   const { data, loading, error, reload } = useApi<Health>("/api/hub/health");
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("attention");
+  const [filter, setFilter] = useState<Filter>("all");
 
   const channelsOk = useMemo(() => {
     if (!data) return 0;
-    return CHANNELS.filter((c) => integrationLevel(data.integrations[c.key]?.status) === "ok").length;
+    return STATUS_CHANNELS.filter((c) => integrationLevel(data.integrations[CHANNEL_META[c].api]?.status) === "ok").length;
   }, [data]);
 
   const rows = useMemo(() => {
     const list = data?.attention?.length ? data.attention : (data?.recent ?? []).filter((e) => needsAttention(e.eventStatus));
-    if (filter === "attention") return list.slice(0, 8);
-    return list.filter((e) => e.channel === filter).slice(0, 8);
+    if (filter === "all") return list.slice(0, 8);
+    return list.filter((e) => toChannelKey(e.channel) === filter).slice(0, 8);
   }, [data, filter]);
 
   if (loading) return <PageLoading />;
@@ -114,7 +97,7 @@ export default function Salud() {
   if (!data) return <EmptyState title="Sin telemetría" body="El Hub no ha registrado salud todavía." />;
 
   const issues = data.pending + data.failed;
-  const down = CHANNELS.map((c) => ({ ...c, info: data.integrations[c.key] })).filter(
+  const down = STATUS_CHANNELS.map((c) => ({ key: c, info: data.integrations[CHANNEL_META[c].api] })).filter(
     (c) => c.info && integrationLevel(c.info.status) !== "ok",
   );
 
@@ -122,32 +105,37 @@ export default function Salud() {
     issues > 0
       ? `Hay ${issues} ${issues === 1 ? "situación que requiere" : "situaciones que requieren"} atención.`
       : down.length > 0
-        ? "Los canales no están del todo operativos."
-        : "Los canales operan. La información está llegando.";
+        ? "Faltan señales recientes de algunos conectores."
+        : "Los conectores reportaron un estado saludable recientemente.";
 
-  const kpis: { kpi: KpiValue; to: string }[] = [
+  const kpis: { kpi: KpiValue; to: string; channel: ChannelKey }[] = [
     {
       kpi: kpi("Necesitan atención", "Eventos que fallaron o no se pudieron confirmar en Míps.", data.failed),
       to: "#eventos",
+      channel: "hub",
     },
     {
       kpi: kpi("Pendientes", "Siguen en el Hub y todavía no se confirman en Míps.", data.pending),
       to: "#eventos",
+      channel: "hub",
     },
     {
-      kpi: kpi("Procesados", "Eventos que el Hub ya resolvió en el dataset demo.", data.processed),
+      kpi: kpi("Procesados", "Eventos que el Hub ya resolvió en los registros.", data.processed),
       to: "/reportes/conciliacion",
+      channel: "hub",
     },
     {
-      kpi: kpi("Canales operativos", "Uber Eats, OpenTable, WhatsApp y Míps con estado operativo.", channelsOk),
+      kpi: kpi("Conectores vigentes", "Conectores con heartbeat autenticado de los últimos dos minutos. No es un SLA del proveedor.", channelsOk),
       to: "#canales",
+      channel: "hub",
     },
   ];
 
-  const priorities = [];
+  const priorities: Priority[] = [];
   if (data.failed > 0) {
     priorities.push({
-      tone: "critical" as const,
+      tone: "critical",
+      channel: "hub",
       title: `${data.failed} ${data.failed === 1 ? "evento necesita" : "eventos necesitan"} atención`,
       description: "No llegaron limpios a Míps. Están identificados para reprocesar.",
       secondary: `${num(data.processed)} procesados en total`,
@@ -157,7 +145,8 @@ export default function Salud() {
   }
   if (data.pending > 0) {
     priorities.push({
-      tone: "attention" as const,
+      tone: "attention",
+      channel: "hub",
       title: `${data.pending} ${data.pending === 1 ? "pendiente" : "pendientes"} en cola`,
       description: "Siguen en el Hub. Todavía no hay folio de Míps.",
       ctaLabel: "Ver cola",
@@ -167,16 +156,18 @@ export default function Salud() {
   for (const c of down) {
     if (priorities.length >= 3) break;
     priorities.push({
-      tone: (integrationLevel(c.info.status) === "critical" ? "critical" : "attention") as "critical" | "attention",
-      title: `${CHANNEL_NAME[c.key] ?? c.key} no está del todo operativo`,
+      tone: integrationLevel(c.info.status) === "critical" ? "critical" : "attention",
+      channel: c.key,
+      title: `${channelConfig[c.key].label} no tiene señal saludable vigente`,
       description: c.info.message || "Hay que revisar este canal.",
       ctaLabel: "Ver canal",
-      to: c.to,
+      to: CHANNEL_META[c.key].to,
     });
   }
   if (priorities.length === 0) {
     priorities.push({
-      tone: "info" as const,
+      tone: "info",
+      channel: "hub",
       title: "Nada que reprocesar ahora",
       description: "Los cuatro canales operan y lo que genera venta se confirma en Míps.",
       ctaLabel: "Ver Hub",
@@ -191,9 +182,10 @@ export default function Salud() {
     <div className="mx-auto max-w-6xl space-y-5">
       <PageIntro
         question="¿Está funcionando todo correctamente?"
+        channel="hub"
         title="Salud del Hub"
         headline={headline}
-        aside={<p className="text-[11px] text-muted-foreground">En vivo · hace {data.lastSyncAgoSeconds} s</p>}
+        aside={<p className="text-[11px] text-muted-foreground">{data.lastSyncAgoSeconds === null ? "Sin registros de sincronización" : `Último registro hace ${data.lastSyncAgoSeconds} s`}</p>}
       />
 
       <HealthStatus
@@ -207,8 +199,8 @@ export default function Salud() {
       <section>
         <h2 className="mb-2 font-serif text-lg">El Hub ahora</h2>
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {kpis.map((item) => (
-            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} showTrend={false} />
+          {kpis.map((item, i) => (
+            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} channel={item.channel} showTrend={false} featured={i === 0} />
           ))}
         </div>
       </section>
@@ -222,31 +214,38 @@ export default function Salud() {
         </div>
       </section>
 
+      <ChartCard title="De la cola a Míps" channel="hub">
+        <FunnelStrip
+          rate={{
+            value: `${Math.round((data.processed / Math.max(1, data.processed + data.pending + data.failed)) * 100)}%`,
+            label: "de los eventos del Hub ya se resolvieron",
+          }}
+          steps={[
+            { label: "Necesitan atención", value: data.failed, channel: "hub" },
+            { label: "Pendientes", value: data.pending, channel: "hub" },
+            { label: "Procesados", value: data.processed, channel: "mips" },
+          ]}
+        />
+      </ChartCard>
+
       <section id="canales" className="scroll-mt-24 rounded-lg border bg-card px-4 py-3.5 shadow-soft">
         <h2 className="font-serif text-lg">Estado de los canales</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Si un canal no está operativo, eso se siente en pedidos, mesas o WhatsApp.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Tres fuentes y un destino. Si una fuente no opera, se siente en pedidos, mesas o WhatsApp; si Míps no opera, no hay folio.
+        </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {CHANNELS.map((c) => {
-            const info = data.integrations[c.key];
-            const level = integrationLevel(info?.status);
+          {STATUS_CHANNELS.map((c) => {
+            const info = data.integrations[CHANNEL_META[c].api];
             return (
-              <Link
-                key={c.key}
-                to={c.to}
-                className="flex items-center justify-between gap-3 rounded-md bg-muted/70 px-3 py-2.5 hover:bg-accent"
-              >
-                <span>
-                  <ChannelBadge channel={c.key} />
-                  <span className="mt-1 block">
-                    <StatusIndicator level={level} label={integrationLabel(info?.status)} compact />
-                  </span>
-                  {info?.message && <span className="mt-0.5 block text-[11px] text-muted-foreground">{info.message}</span>}
-                </span>
-                <span className="text-right">
-                  <span className="block font-serif text-2xl tabular leading-none">{num(info?.today ?? 0)}</span>
-                  <span className="text-[11px] text-muted-foreground">{c.metric} hoy</span>
-                </span>
-              </Link>
+              <ChannelSourceCard
+                key={c}
+                channel={c}
+                status={info?.status}
+                value={info?.today ?? 0}
+                metric={CHANNEL_META[c].metric}
+                message={info?.message}
+                to={CHANNEL_META[c].to}
+              />
             );
           })}
         </div>
@@ -254,56 +253,17 @@ export default function Salud() {
 
       <section id="eventos" className="scroll-mt-24 rounded-lg border bg-card px-4 py-3.5 shadow-soft">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-serif text-lg">Qué hay que atender</h2>
-          <FilterBar options={[...FILTERS]} value={filter} onChange={setFilter} ariaLabel="Filtrar eventos" />
+          <div>
+            <h2 className="font-serif text-lg">Qué hay que atender</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {filter === "all"
+                ? "Eventos pendientes o con error, de cualquier canal."
+                : `Eventos pendientes o con error de ${channelConfig[filter].label}.`}
+            </p>
+          </div>
+          <ChannelSelector options={FILTERS} value={filter} onChange={setFilter} ariaLabel="Filtrar eventos por canal" />
         </div>
-        {rows.length === 0 ? (
-          <p className="py-6 text-sm text-muted-foreground">No hay eventos por atender en este filtro.</p>
-        ) : (
-          <DataTable>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Hora</TableHead>
-                <TableHead>Canal</TableHead>
-                <TableHead>Qué pasó</TableHead>
-                <TableHead>ID del pedido</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Folio Míps</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((e) => {
-                const href = CHANNEL_PAGE[e.channel] ?? "/hub";
-                return (
-                  <TableRow key={e.externalId + e.occurredAt} className="cursor-pointer">
-                    <TableCell>
-                      <Link to={href} className="block tabular">
-                        {hourMin(e.occurredAt)}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Link to={href}>
-                        <ChannelBadge channel={e.channel} />
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Link to={href}>{WHAT[e.eventType] ?? e.eventType}</Link>
-                    </TableCell>
-                    <TableCell className="tabular">
-                      <Link to={href}>{e.externalId}</Link>
-                    </TableCell>
-                    <TableCell>
-                      <Link to={href}>{STATE[e.eventStatus] ?? e.eventStatus}</Link>
-                    </TableCell>
-                    <TableCell className="tabular">
-                      <Link to={href}>{e.eventType === "order" || e.eventType === "sale" ? e.mipsFolio ?? "—" : "—"}</Link>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </DataTable>
-        )}
+        <ChannelEventTable rows={rows} attentionTo={null} emptyText="No hay eventos por atender en este filtro." />
         <Link to="/reportes/conciliacion" className="mt-3 inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">
           Bajar conciliación →
         </Link>
@@ -315,8 +275,11 @@ export default function Salud() {
           <ul className="mt-2 divide-y">
             {recentIncidents.map((i) => (
               <li key={i.title} className="flex flex-wrap items-start justify-between gap-3 py-2.5">
-                <div>
-                  <p className="font-medium">{i.title}</p>
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-1.5">
+                    <ChannelBadge channel={i.channel} size="sm" />
+                    <span className="font-medium">{i.title}</span>
+                  </p>
                   <p className="mt-0.5 text-sm text-muted-foreground">{i.description}</p>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
@@ -337,9 +300,10 @@ export default function Salud() {
         </div>
         <ul className="mt-2 divide-y">
           {data.timeline.slice(0, 5).map((t) => (
-            <li key={t.occurredAt + t.message} className="flex items-start gap-3 py-2 text-sm">
+            <li key={t.occurredAt + t.message} className="flex items-center gap-3 py-2 text-sm">
               <span className="w-12 shrink-0 tabular text-muted-foreground">{hourMin(t.occurredAt)}</span>
-              <span className="flex-1">{t.message}</span>
+              <ChannelBadge channel={toChannelKey(t.channel, "hub")} variant="plain" className="w-[104px] justify-start" />
+              <span className={cn("flex-1", t.severity === "warning" && "font-medium text-amber")}>{t.message}</span>
             </li>
           ))}
         </ul>

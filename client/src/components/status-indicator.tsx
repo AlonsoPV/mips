@@ -34,8 +34,8 @@ export function integrationLevel(status?: string): HealthLevel {
 }
 
 export function integrationLabel(status?: string): string {
-  if (status === "connected") return "Operativo";
+  if (status === "connected") return "Heartbeat vigente";
   if (status === "attention") return "Atención";
   if (status === "error") return "Necesita atención";
-  return "Sin actividad";
+  return "Sin señal verificada";
 }

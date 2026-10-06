@@ -13,6 +13,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
+    if (res.status === 401 && path !== "/api/auth/login") window.dispatchEvent(new Event("mips:unauthorized"));
     let message = "Error de servidor";
     try {
       const body = await res.json();

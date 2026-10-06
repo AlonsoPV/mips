@@ -12,12 +12,15 @@ export function KpiCard({
   to,
   showTrend = true,
   channel,
+  featured = false,
 }: {
   kpi: KpiValue;
   to?: string;
   showTrend?: boolean;
   /** Fuente del dato. Se muestra antes del número para que el origen quede claro primero. */
   channel?: ChannelKey;
+  /** Primera cifra de la pantalla: más grande, se lee antes. */
+  featured?: boolean;
 }) {
   const body = (
     <>
@@ -27,7 +30,14 @@ export function KpiCard({
         </div>
       )}
       <MetricTooltip label={kpi.label}>{kpi.tooltip}</MetricTooltip>
-      <p className="mt-2 font-serif text-3xl tabular tracking-tight md:text-[2rem]">{formatKpi(kpi.value, kpi.unit)}</p>
+      <p
+        className={cn(
+          "mt-2 font-serif tabular tracking-tight",
+          featured ? "text-4xl md:text-5xl" : "text-3xl md:text-[2.15rem]",
+        )}
+      >
+        {formatKpi(kpi.value, kpi.unit)}
+      </p>
       {showTrend && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <TrendIndicator value={kpi.deltaPct} />
@@ -40,6 +50,7 @@ export function KpiCard({
   const className = cn(
     "rounded-lg border bg-card px-4 py-3.5 text-left shadow-soft transition",
     to && "hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    featured && "col-span-2 xl:col-span-1",
   );
 
   if (to) {

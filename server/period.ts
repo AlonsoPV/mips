@@ -18,15 +18,27 @@ export function parsePeriod(query: { from?: string; to?: string; range?: string 
   let label = "30 días";
 
   if (query.from && query.to) {
-    from = new Date(query.from);
-    to = new Date(query.to);
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-      from = addDays(todayStart, -29);
-      label = "30 días";
+    const civil = (value: string, end: boolean) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value);
+      const utc = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(utc.getTime()) || utc.toISOString().slice(0, 10) !== value) return new Date(NaN);
+      const [year, month, day] = value.split("-").map(Number);
+      const result = mexicoDate(year!, month!, day!);
+      const parts = mexicoParts(result);
+      if (parts.year !== year || parts.month !== month || parts.day !== day) return new Date(NaN);
+      return end ? new Date(addDays(result, 1).getTime() - 1) : result;
+    };
+    from = civil(query.from, false);
+    to = civil(query.to, true);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      throw Object.assign(new Error("Periodo inválido: verifica las fechas y su orden"), { status: 400 });
     } else {
       label = "Personalizado";
     }
   } else {
+    if (query.from || query.to) {
+      throw Object.assign(new Error("El periodo requiere from y to"), { status: 400 });
+    }
     switch (range) {
       case "today":
         from = todayStart;
@@ -47,6 +59,8 @@ export function parsePeriod(query: { from?: string; to?: string; range?: string 
         break;
     }
   }
+
+  if (to.getTime() - from.getTime() > 366 * 86400000) throw Object.assign(new Error("El periodo máximo es de 366 días"), { status: 400 });
 
   const duration = Math.max(1, to.getTime() - from.getTime());
   const previousTo = new Date(from.getTime() - 1);

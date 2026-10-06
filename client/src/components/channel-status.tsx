@@ -18,7 +18,7 @@ export function ChannelStatus({
 }: {
   /** Claves de la API: uber_eats, opentable, whatsapp, mips. */
   integrations: Record<string, { status: string }>;
-  lastSyncAgoSeconds: number;
+  lastSyncAgoSeconds: number | null;
   pending: number;
   failed: number;
   issuesTo?: string;
@@ -38,7 +38,7 @@ export function ChannelStatus({
     >
       <span className="inline-flex items-center gap-1.5">
         <ChannelBadge channel="hub" variant="plain" size="md" />
-        <StatusIndicator level={hubOk ? "ok" : "attention"} label={hubOk ? "Operativo" : "Con atención"} compact />
+        <StatusIndicator level={hubOk ? "ok" : "attention"} label={hubOk ? "Conectores vigentes" : "Revisar estado"} compact />
       </span>
       <span className="hidden h-3 w-px bg-border sm:block" />
       {STATUS_CHANNELS.map((c) => {
@@ -51,7 +51,7 @@ export function ChannelStatus({
         );
       })}
       <span className="ml-auto flex flex-wrap items-center gap-3 text-muted-foreground">
-        <span>Última sincronización: {lastSyncAgoSeconds} s</span>
+        <span>{lastSyncAgoSeconds === null ? "Sin registros de sincronización" : `Último registro: hace ${lastSyncAgoSeconds} s`}</span>
         <Link to={issuesTo} className="font-medium text-foreground hover:underline">
           {pending} pendientes{failed ? ` · ${failed} necesitan atención` : ""}
         </Link>

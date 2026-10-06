@@ -1,11 +1,17 @@
 import { Link } from "react-router-dom";
+import { ChannelBadge } from "@/components/channel-badge";
+import { ChartCard } from "@/components/chart-card";
+import { SimpleDonut } from "@/components/charts";
 import { KpiCard } from "@/components/kpi-card";
 import { MetricTooltip } from "@/components/metric-tooltip";
 import { PageIntro } from "@/components/page-intro";
 import { PriorityCard, type PriorityTone } from "@/components/priority-card";
+import { ShareBars } from "@/components/share-bars";
 import { EmptyState, PageError, PageLoading } from "@/components/states";
 import { useApi } from "@/hooks/use-api";
 import { usePeriod } from "@/hooks/use-period";
+import { channelForInsight, type ChannelKey } from "@/lib/channel-config";
+import { num, pct } from "@/lib/format";
 import type { Insight, KpiValue } from "@shared/types";
 
 interface Mkt {
@@ -45,7 +51,7 @@ function actionLink(o: Insight, qs: string) {
 export default function Marketing() {
   const { qs } = usePeriod();
   const mkt = useApi<Mkt>(`/api/marketing/opportunities${qs}`);
-  const cust = useApi<Cust>(`/api/customers/summary${qs}`);
+  const cust = useApi<Cust>("/api/customers/summary");
   const uber = useApi<Uber>(`/api/uber/summary${qs}`);
 
   if (mkt.loading) return <PageLoading />;
@@ -58,27 +64,38 @@ export default function Marketing() {
   const growing = uber.data?.growingProducts.filter((p) => (p.growthPct ?? 0) > 0).length ?? 0;
   const star = uber.data?.growingProducts.find((p) => (p.growthPct ?? 0) > 0);
 
-  const kpis: { kpi: KpiValue; to: string }[] = [
+  const segmentItems = Object.entries(cust.data?.segments ?? {}).map(([id, value]) => ({
+    label: id === "inactivos" ? "Sin volver" : id === "alto_valor" ? "Alto valor" : id.charAt(0).toUpperCase() + id.slice(1),
+    value,
+  }));
+  const growingList = (uber.data?.growingProducts ?? []).filter((p) => (p.growthPct ?? 0) > 0).slice(0, 5);
+
+  const kpis: { kpi: KpiValue; to: string; channel: ChannelKey }[] = [
     {
-      kpi: kpi("Lecturas", "Horario, producto o recurrencia que vale la pena probar. No es un gestor de campañas.", opportunities.length),
+      kpi: kpi("Lecturas", "Horario, producto o recurrencia que vale la pena probar. Las cruza el Hub; no es un gestor de campañas.", opportunities.length),
       to: `${qs}#prioridades`,
+      channel: "hub",
     },
     {
-      kpi: kpi("Sin volver", "Clientes identificables que no han regresado en más de 45 días.", inactivos),
+      kpi: kpi("Sin volver", "Segmento inactivo del historial acumulado; no depende del periodo.", inactivos),
       to: `/clientes${qs}&segment=inactivos`,
+      channel: "hub",
     },
     {
-      kpi: kpi("Alto valor", "Clientes identificables con gasto y visitas altos.", alto),
+      kpi: kpi("Alto valor", "Clientes de alto valor en el historial acumulado; no depende del periodo.", alto),
       to: `/clientes${qs}&segment=alto_valor`,
+      channel: "hub",
     },
     {
       kpi: kpi("Productos en alza", "Productos de Uber Eats con venta por encima del periodo anterior.", growing),
       to: `/ventas${qs}&focus=productos`,
+      channel: "uber",
     },
   ];
 
   const priorities = opportunities.slice(0, 3).map((o) => ({
     tone: TONE[o.priority] ?? "opportunity",
+    channel: channelForInsight(o),
     title: o.title,
     description: o.description,
     secondary: o.metric ?? o.impact,
@@ -100,6 +117,7 @@ export default function Marketing() {
     <div className="mx-auto max-w-6xl space-y-5">
       <PageIntro
         question="¿Dónde están las oportunidades?"
+        channel="hub"
         title="Oportunidades"
         headline={headline}
         aside={<MetricTooltip label="Sobre estas lecturas">{mkt.data.disclaimer}</MetricTooltip>}
@@ -108,8 +126,8 @@ export default function Marketing() {
       <section>
         <h2 className="mb-2 font-serif text-lg">Qué vale la pena ahora</h2>
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {kpis.map((item) => (
-            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} showTrend={false} />
+          {kpis.map((item, i) => (
+            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} channel={item.channel} showTrend={false} featured={i === 0} />
           ))}
         </div>
       </section>
@@ -130,30 +148,78 @@ export default function Marketing() {
       <section className="grid gap-2.5 md:grid-cols-3">
         <h2 className="font-serif text-lg md:col-span-3">Por dónde atacar</h2>
         <Lever
+          channel={horario ? channelForInsight(horario) : "hub"}
           kind="Horario"
           title={horario?.title ?? "Cuándo se junta la demanda"}
-          to="/reservaciones"
+          value={horario?.metric}
+          to={horario ? actionLink(horario, qs) : "/inicio#demanda"}
         />
         <Lever
+          channel="uber"
           kind="Producto"
           title={star?.name ?? producto?.metric ?? "Qué está jalando ticket"}
+          value={star?.growthPct != null ? pct(star.growthPct) : undefined}
           to={`/ventas${qs}&focus=productos`}
         />
         <Lever
+          channel="hub"
           kind="Recurrencia"
           title={recurrencia?.title ?? "Quién no ha vuelto"}
+          value={inactivos > 0 ? num(inactivos) : undefined}
           to={`/clientes${qs}&segment=inactivos`}
         />
       </section>
+
+      {(segmentItems.length > 0 || growingList.length > 0) && (
+        <div className="grid gap-2.5 lg:grid-cols-2">
+          {segmentItems.length > 0 && (
+            <ChartCard title="Cómo se parten los identificables" channel="hub">
+              <SimpleDonut
+                compact
+                channel="hub"
+                data={segmentItems.map((s) => ({ name: s.label, value: s.value }))}
+                nameKey="name"
+                valueKey="value"
+                center={{ value: num(segmentItems.reduce((s, x) => s + x.value, 0)), label: "Clientes" }}
+              />
+            </ChartCard>
+          )}
+          {growingList.length > 0 && (
+            <ChartCard title="Productos en alza" channel="uber">
+              <ShareBars
+                channel="uber"
+                items={growingList.map((p) => ({ label: p.name, value: p.growthPct ?? 0 }))}
+                format={(n) => pct(n)}
+              />
+            </ChartCard>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function Lever({ kind, title, to }: { kind: string; title: string; to: string }) {
+function Lever({
+  channel,
+  kind,
+  title,
+  to,
+  value,
+}: {
+  channel: ChannelKey;
+  kind: string;
+  title: string;
+  to: string;
+  value?: string;
+}) {
   return (
     <Link to={to} className="rounded-lg border bg-card px-4 py-3 shadow-soft hover:border-primary/40">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{kind}</p>
-      <p className="mt-1 font-serif text-lg leading-snug">{title}</p>
+      <p className="flex items-center gap-1.5">
+        <ChannelBadge channel={channel} size="sm" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{kind}</span>
+      </p>
+      <p className="mt-1.5 font-serif text-lg leading-snug">{title}</p>
+      {value && <p className="mt-2 font-serif text-3xl tabular leading-none">{value}</p>}
     </Link>
   );
 }

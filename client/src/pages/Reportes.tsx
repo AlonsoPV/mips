@@ -1,23 +1,29 @@
-import { Link, useParams } from "react-router-dom";
-import { ChannelBadge } from "@/components/channel-badge";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { PeakHour } from "@/components/big-number";
+import { ChannelEventTable } from "@/components/channel-event-table";
+import { ChannelIcon } from "@/components/channel-icon";
 import { ChartCard } from "@/components/chart-card";
-import { SimpleBar, SimpleLine } from "@/components/charts";
+import { SimpleBar, SimpleDonut, SimpleLine } from "@/components/charts";
 import { DataTable, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/data-table";
+import { FunnelStrip } from "@/components/funnel-strip";
 import { Heatmap, type HeatCell } from "@/components/heatmap";
 import { KpiCard } from "@/components/kpi-card";
 import { PageIntro } from "@/components/page-intro";
-import { PriorityCard } from "@/components/priority-card";
+import { ShareBars } from "@/components/share-bars";
 import { TrendIndicator } from "@/components/trend-indicator";
 import { EmptyState, PageError, PageLoading } from "@/components/states";
 import { useApi } from "@/hooks/use-api";
 import { usePeriod } from "@/hooks/use-period";
 import { exportUrl } from "@/lib/api";
-import { mxn, num } from "@/lib/format";
+import { channelConfig, type ChannelKey } from "@/lib/channel-config";
+import { DOW_FULL, mxn, num } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { KpiValue } from "@shared/types";
 
 const REPORTS = [
   {
     id: "ejecutivo",
+    channel: "hub",
     title: "Resumen del periodo",
     question: "¿Cómo cerró el periodo?",
     body: "Los cuatro números para explicar el corte.",
@@ -26,6 +32,7 @@ const REPORTS = [
   },
   {
     id: "uber",
+    channel: "uber",
     title: "Pedidos",
     question: "¿Qué vendimos en Uber Eats?",
     body: "Pedidos, venta confirmada y productos.",
@@ -34,6 +41,7 @@ const REPORTS = [
   },
   {
     id: "opentable",
+    channel: "opentable",
     title: "Reservaciones",
     question: "¿Cómo se pidió mesa?",
     body: "Demanda de mesa y cómo cerró.",
@@ -42,6 +50,7 @@ const REPORTS = [
   },
   {
     id: "whatsapp",
+    channel: "whatsapp",
     title: "WhatsApp",
     question: "¿Por qué escribieron?",
     body: "Motivos de contacto. No son ventas.",
@@ -50,6 +59,7 @@ const REPORTS = [
   },
   {
     id: "demanda",
+    channel: "hub",
     title: "Demanda",
     question: "¿Cuándo se junta todo?",
     body: "Día y hora de pedidos, mesas y WhatsApp.",
@@ -58,6 +68,7 @@ const REPORTS = [
   },
   {
     id: "productos",
+    channel: "uber",
     title: "Productos",
     question: "¿Qué está jalando ticket?",
     body: "Mix, ticket y lo que crece.",
@@ -66,7 +77,8 @@ const REPORTS = [
   },
   {
     id: "clientes",
-    title: "Clientes",
+    channel: "hub",
+    title: "Clientes identificados",
     question: "¿Quién ya nos conoce?",
     body: "Segmentos identificables del Hub.",
     live: "/clientes",
@@ -74,27 +86,29 @@ const REPORTS = [
   },
   {
     id: "conciliacion",
+    channel: "mips",
     title: "Conciliación",
     question: "¿Llegó limpio a Míps?",
     body: "Eventos, folios y lo que necesita atención.",
     live: "/salud",
     liveLabel: "Ver salud del Hub",
   },
-] as const;
+] as const satisfies ReadonlyArray<{
+  id: string;
+  channel: ChannelKey;
+  title: string;
+  question: string;
+  body: string;
+  live: string;
+  liveLabel: string;
+}>;
 
 type ReportId = (typeof REPORTS)[number]["id"];
 
-interface Summary {
-  kpis: KpiValue[];
-}
-
-interface Hub {
-  pending: number;
-  failed: number;
-  processed: number;
-}
-
 interface ReportPayload {
+  offset?: number;
+  nextOffset?: number | null;
+  total?: number;
   kpis?: KpiValue[];
   byDay?: Array<{ day: string; sales?: number; orders?: number; reservations?: number }>;
   topProducts?: Array<{ name: string; quantity?: number; sales: number; ticket?: number; growthPct?: number | null }>;
@@ -157,6 +171,26 @@ function countKpi(label: string, tooltip: string, value: number): KpiValue {
   return { label, tooltip, value, previousValue: value, deltaPct: 0, unit: "count" };
 }
 
+/**
+ * Fuente de un KPI dentro de un reporte. Por defecto es el canal del reporte;
+ * las excepciones son las que mezclan fuentes o ya pasaron por Míps.
+ */
+const KPI_CHANNEL_OVERRIDE: Record<string, ChannelKey> = {
+  "Ventas conciliadas": "mips",
+  "Ventas digitales conciliadas": "mips",
+  "Operaciones con error": "hub",
+  "Solicitudes convertidas": "hub",
+  "Actividad digital": "hub",
+  "Comensales reservados": "opentable",
+  "Ticket promedio": "uber",
+  "Clientes únicos": "whatsapp",
+  "Clientes identificados": "whatsapp",
+};
+
+function kpiChannel(label: string, fallback: ChannelKey): ChannelKey {
+  return KPI_CHANNEL_OVERRIDE[label] ?? fallback;
+}
+
 export default function Reportes() {
   const { id } = useParams();
   if (id) return <ReportDetail id={id} />;
@@ -165,124 +199,57 @@ export default function Reportes() {
 
 function ReportLibrary() {
   const { qs } = usePeriod();
-  const summary = useApi<Summary>(`/api/dashboard/summary${qs}`);
-  const hub = useApi<Hub>("/api/hub/health");
-
-  if (summary.loading || hub.loading) return <PageLoading />;
-  if (summary.error) return <PageError message={summary.error} onRetry={summary.reload} />;
-  if (!summary.data) return <EmptyState title="Sin corte" body="Todavía no hay números para reportar en este periodo." />;
-
-  const pick = (label: string) => summary.data!.kpis.find((k) => k.label === label);
+  const summary = useApi<{ kpis: KpiValue[] }>(`/api/dashboard/summary${qs}`);
+  const pick = (label: string) => summary.data?.kpis.find((k) => k.label === label);
   const actividad = pick("Actividad digital");
-  const ventas = pick("Ventas digitales confirmadas");
+  const ventas = pick("Ventas digitales conciliadas") ?? pick("Ventas conciliadas") ?? pick("Ventas digitales confirmadas");
   const ticket = pick("Ticket promedio");
   const covers = pick("Comensales reservados");
-  const kpis: { kpi: KpiValue; to: string }[] = [
-    actividad && { kpi: actividad, to: "/reportes/ejecutivo" },
-    ventas && { kpi: { ...ventas, label: "Ventas digitales" }, to: "/reportes/uber" },
-    ticket && { kpi: ticket, to: "/reportes/productos" },
-    covers && { kpi: covers, to: "/reportes/opentable" },
-  ].filter(Boolean) as { kpi: KpiValue; to: string }[];
-
-  const issues = (hub.data?.pending ?? 0) + (hub.data?.failed ?? 0);
-  const salesDown = (ventas?.deltaPct ?? 0) < 0;
-  const priorities = [];
-  if (hub.data && hub.data.failed > 0) {
-    priorities.push({
-      tone: "critical" as const,
-      title: `${hub.data.failed} ${hub.data.failed === 1 ? "evento necesita" : "eventos necesitan"} conciliación`,
-      description: "No llegaron limpios a Míps. Conviene revisar el corte antes de exportarlo.",
-      ctaLabel: "Abrir conciliación",
-      to: "/reportes/conciliacion",
-    });
-  } else if (hub.data && hub.data.pending > 0) {
-    priorities.push({
-      tone: "attention" as const,
-      title: `${hub.data.pending} ${hub.data.pending === 1 ? "pendiente" : "pendientes"} en el Hub`,
-      description: "Siguen en cola. El CSV de conciliación ayuda a explicar el desfase.",
-      ctaLabel: "Abrir conciliación",
-      to: "/reportes/conciliacion",
-    });
-  }
-  if (salesDown) {
-    priorities.push({
-      tone: "attention" as const,
-      title: "Las ventas digitales piden revisión",
-      description: "El corte está por debajo del periodo anterior. Baja pedidos y productos.",
-      deltaPct: ventas?.deltaPct,
-      ctaLabel: "Abrir pedidos",
-      to: "/reportes/uber",
-    });
-  }
-  if (priorities.length < 3) {
-    priorities.push({
-      tone: "opportunity" as const,
-      title: "El mix de productos explica el ticket",
-      description: "Sirve para mostrar qué se pidió y qué conviene destacar.",
-      ctaLabel: "Abrir productos",
-      to: "/reportes/productos",
-    });
-  }
-  if (priorities.length < 3) {
-    priorities.push({
-      tone: "info" as const,
-      title: "La demanda se ve por día y hora",
-      description: "Un solo recorte para mesa, delivery y WhatsApp.",
-      ctaLabel: "Abrir demanda",
-      to: "/reportes/demanda",
-    });
-  }
-
-  const headline =
-    issues > 0
-      ? "Hay movimientos que conviene conciliar antes de exportar."
-      : salesDown
-        ? "El corte pide revisión de pedidos."
-        : "Elige qué bajar. El CSV es para explicar, no para operar.";
+  const kpis: { kpi: KpiValue; to: string; channel: ChannelKey }[] = [
+    actividad && { kpi: actividad, to: "/reportes/ejecutivo", channel: "hub" as const },
+    ventas && { kpi: { ...ventas, label: "Ventas conciliadas en Míps" }, to: "/reportes/conciliacion", channel: "mips" as const },
+    ticket && { kpi: ticket, to: "/reportes/productos", channel: "uber" as const },
+    covers && { kpi: covers, to: "/reportes/opentable", channel: "opentable" as const },
+  ].filter(Boolean) as { kpi: KpiValue; to: string; channel: ChannelKey }[];
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <PageIntro question="¿Qué vale la pena revisar a fondo?" title="Reportes" headline={headline} />
-
+      <PageIntro question="¿Qué corte necesitas compartir?" title="Reportes" headline="Elige un reporte para revisar sus datos o descargar el CSV." />
+      <p className="text-sm text-muted-foreground">
+        Ventas, reservas y conversaciones usan el periodo seleccionado. Clientes muestra el acumulado; conciliación usa el periodo seleccionado.
+      </p>
+      {kpis.length > 0 && (
+        <section>
+          <h2 className="mb-2 font-serif text-lg">El corte ahora</h2>
+          <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
+            {kpis.map((item, i) => (
+              <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} channel={item.channel} featured={i === 0} />
+            ))}
+          </div>
+        </section>
+      )}
       <section>
-        <h2 className="mb-2 font-serif text-lg">El corte ahora</h2>
-        <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {kpis.map((item) => (
-            <KpiCard key={item.kpi.label} kpi={item.kpi} to={item.to} />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-2 font-serif text-lg">Prioridades</h2>
-        <div className="flex snap-x gap-2.5 overflow-x-auto pb-1 md:grid md:grid-cols-3 md:overflow-visible">
-          {priorities.slice(0, 3).map((p) => (
-            <PriorityCard key={p.title} {...p} />
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
-        <h2 className="font-serif text-lg">Qué puedes bajar</h2>
-        <ul className="mt-2 divide-y">
-          {REPORTS.map((r) => (
-            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
-              <div className="min-w-0">
-                <Link to={`/reportes/${r.id}`} className="font-serif text-lg hover:text-primary">
-                  {r.title}
+        <h2 className="mb-2 font-serif text-lg">Qué puedes bajar</h2>
+        <ul className="grid gap-2.5 sm:grid-cols-2">
+          {REPORTS.map((r) => {
+            const cfg = channelConfig[r.channel];
+            return (
+              <li key={r.id}>
+                <Link
+                  to={`/reportes/${r.id}`}
+                  className="flex h-full items-start gap-3 rounded-lg border-l-2 bg-card px-4 py-3.5 shadow-soft hover:bg-accent"
+                  style={{ borderLeftColor: cfg.hex }}
+                >
+                  <ChannelIcon channel={r.channel} size="md" ring />
+                  <span className="min-w-0 flex-1">
+                    <span className={cn("block text-xs font-medium", cfg.accent)}>{cfg.label}</span>
+                    <span className="mt-0.5 block font-serif text-lg leading-snug">{r.title}</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">{r.body}</span>
+                  </span>
                 </Link>
-                <p className="text-sm text-muted-foreground">{r.body}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <Link to={`/reportes/${r.id}`} className="text-sm font-medium text-primary hover:underline">
-                  Abrir →
-                </Link>
-                <a href={exportUrl(r.id, qs)} className="text-sm text-muted-foreground hover:text-primary hover:underline">
-                  CSV
-                </a>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </section>
     </div>
@@ -291,8 +258,11 @@ function ReportLibrary() {
 
 function ReportDetail({ id }: { id: string }) {
   const { qs } = usePeriod();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const offset = Number(searchParams.get("offset") || 0);
+  const reportQs = id === "clientes" ? "" : qs;
   const meta = REPORTS.find((r) => r.id === id);
-  const { data, loading, error, reload } = useApi<ReportPayload>(meta ? `/api/reports/${id}${qs}` : null);
+  const { data, loading, error, reload } = useApi<ReportPayload>(meta ? `/api/reports/${id}${reportQs}${reportQs ? "&" : "?"}offset=${Number.isSafeInteger(offset) && offset >= 0 ? offset : 0}` : null);
 
   if (!meta) return <EmptyState title="Reporte no encontrado" body="Ese recorte no está en la biblioteca." />;
   if (loading) return <PageLoading />;
@@ -306,18 +276,26 @@ function ReportDetail({ id }: { id: string }) {
       </Link>
       <PageIntro
         question={meta.question}
+        channel={meta.channel}
         title={meta.title}
         headline={meta.body}
         aside={
           <a
-            href={exportUrl(id, qs)}
+            href={exportUrl(id, reportQs)}
             className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline"
           >
             Exportar CSV →
           </a>
         }
       />
-      <ReportBody id={id as ReportId} data={data} />
+      {id === "clientes" && <p className="text-sm text-muted-foreground">Historial acumulado. La tabla muestra clientes destacados; el CSV incluye el padrón completo.</p>}
+      {id === "conciliacion" && <p className="text-sm text-muted-foreground">Eventos del periodo seleccionado. El CSV incluye todos; la tabla muestra páginas de 100.</p>}
+      {id === "conciliacion" && <div className="flex items-center gap-3 text-sm">
+        <button disabled={!offset} onClick={() => { const p = new URLSearchParams(searchParams); p.set("offset", String(Math.max(0, offset - 100))); setSearchParams(p); }}>Anterior</button>
+        <span>{data.total ?? 0} eventos · página {Math.floor(offset / 100) + 1}</span>
+        <button disabled={data.nextOffset == null} onClick={() => { const p = new URLSearchParams(searchParams); p.set("offset", String(data.nextOffset)); setSearchParams(p); }}>Siguiente</button>
+      </div>}
+      <ReportBody id={id as ReportId} channel={meta.channel} data={data} />
       <Link to={meta.live} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">
         {meta.liveLabel} →
       </Link>
@@ -325,32 +303,65 @@ function ReportDetail({ id }: { id: string }) {
   );
 }
 
-function ReportBody({ id, data }: { id: ReportId; data: ReportPayload }) {
+function ReportBody({ id, channel, data }: { id: ReportId; channel: ChannelKey; data: ReportPayload }) {
   if (id === "demanda" && data.cells) {
+    const peak = data.peak;
     return (
-      <ChartCard title="¿Cuándo se junta la demanda?">
-        <Heatmap cells={data.cells} />
+      <ChartCard title="¿Cuándo se junta la demanda? · Actividad digital" channel="hub">
+        <Heatmap
+          cells={data.cells}
+          description="Pedidos, reservaciones y conversaciones por día y hora. Son métricas distintas; el total sólo muestra dónde se concentra la actividad."
+        />
+        {peak && (
+          <PeakHour
+            className="mt-3"
+            hour={peak.hour}
+            channel="hub"
+            caption="Mayor concentración"
+            hint={`${DOW_FULL[peak.dow]} · ${String(peak.hour).padStart(2, "0")}:00`}
+          />
+        )}
       </ChartCard>
     );
   }
 
   if (id === "conciliacion") {
-    const kpis = [
-      countKpi("Procesados", "Eventos que el Hub ya resolvió.", data.processed ?? 0),
-      countKpi("Pendientes", "Siguen en cola, todavía sin confirmar en Míps.", data.pending ?? 0),
-      countKpi("Necesitan atención", "No se confirmaron limpios.", data.failed ?? 0),
-      countKpi("Confirmados hoy", "Ventas de canales digitales con folio de Míps hoy.", data.integrations?.mips?.today ?? 0),
+    const kpis: { kpi: KpiValue; to: string; channel: ChannelKey }[] = [
+      { kpi: countKpi("Procesados", "Eventos que el Hub ya resolvió.", data.processed ?? 0), to: "/salud", channel: "hub" },
+      { kpi: countKpi("Pendientes", "Siguen en cola del Hub, todavía sin confirmar en Míps.", data.pending ?? 0), to: "/salud#eventos", channel: "hub" },
+      { kpi: countKpi("Necesitan atención", "No se confirmaron limpios en Míps.", data.failed ?? 0), to: "/salud#eventos", channel: "hub" },
+      {
+        kpi: countKpi("Eventos del periodo", "Todos los eventos del restaurante dentro del periodo seleccionado.", data.total ?? 0),
+        to: "/salud",
+        channel: "hub",
+      },
     ];
     return (
       <>
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {kpis.map((k) => (
-            <KpiCard key={k.label} kpi={k} to="/salud" showTrend={false} />
+          {kpis.map((k, i) => (
+            <KpiCard key={k.kpi.label} kpi={k.kpi} to={k.to} channel={k.channel} showTrend={false} featured={i === 0} />
           ))}
         </div>
+        <ChartCard title="De la cola a Míps" channel="mips">
+          <FunnelStrip
+            rate={{
+              value: `${Math.round(((data.processed ?? 0) / Math.max(1, (data.processed ?? 0) + (data.pending ?? 0) + (data.failed ?? 0))) * 100)}%`,
+              label: "de los eventos del periodo ya se resolvieron",
+            }}
+            steps={[
+              { label: "Necesitan atención", value: data.failed ?? 0, channel: "hub" },
+              { label: "Pendientes", value: data.pending ?? 0, channel: "hub" },
+              { label: "Procesados", value: data.processed ?? 0, channel: "mips" },
+            ]}
+          />
+        </ChartCard>
         <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
-          <h2 className="font-serif text-lg">Últimos movimientos</h2>
-          <EventTable rows={(data.recent ?? []).slice(0, 8)} />
+          <h2 className="font-serif text-lg">Movimientos de esta página</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Qué recibió el Hub de cada canal y si ya tiene folio de Míps.</p>
+          <div className="mt-2">
+            <ChannelEventTable rows={data.recent ?? []} showTime={true} emptyText="No hay movimientos para listar." />
+          </div>
         </section>
       </>
     );
@@ -376,10 +387,21 @@ function ReportBody({ id, data }: { id: ReportId; data: ReportPayload }) {
     return (
       <>
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {main.map((k) => (
-            <KpiCard key={k.label} kpi={k} to="/clientes" showTrend={false} />
+          {main.map((k, i) => (
+            <KpiCard key={k.label} kpi={k} to="/clientes" channel="hub" showTrend={false} featured={i === 0} />
           ))}
         </div>
+        {data.segments && (
+          <ChartCard title="Cómo se parten" channel="hub">
+            <ShareBars
+              channel="hub"
+              items={Object.entries(data.segments).map(([id, value]) => ({
+                label: SEGMENT[id] ?? id,
+                value,
+              }))}
+            />
+          </ChartCard>
+        )}
         <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
           <h2 className="font-serif text-lg">A quién cuidar</h2>
           <DataTable>
@@ -435,20 +457,37 @@ function ReportBody({ id, data }: { id: ReportId; data: ReportPayload }) {
     <>
       {kpis.length > 0 && (
         <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
-          {kpis.map((k) => (
-            <KpiCard key={k.label} kpi={k} />
+          {kpis.map((k, i) => (
+            <KpiCard
+              key={k.label}
+              kpi={k.label === "Clientes únicos" ? { ...k, label: "Clientes identificados" } : k}
+              channel={kpiChannel(k.label, channel)}
+              featured={i === 0}
+            />
           ))}
         </div>
       )}
 
       {id === "opentable" && otHeat.length > 0 && (
-        <ChartCard title="¿Cuándo quieren mesa?">
-          <Heatmap cells={otHeat} metric="ot" />
+        <ChartCard title="¿Cuándo quieren mesa?" channel="opentable">
+          <Heatmap cells={otHeat} metric="ot" description="Reservaciones de OpenTable por día y hora de visita." />
+          {data.peak && (
+            <PeakHour
+              className="mt-3"
+              hour={data.peak.hour}
+              channel="opentable"
+              caption="Momento más pedido"
+              hint={DOW_FULL[data.peak.dow]}
+            />
+          )}
         </ChartCard>
       )}
 
       {showTrend && data.byDay && (
-        <ChartCard title={data.byDay[0]?.sales !== undefined ? "¿Cómo cambia la venta?" : "¿Cómo se mueve el periodo?"}>
+        <ChartCard
+          title={data.byDay[0]?.sales !== undefined ? "¿Cómo cambia la venta confirmada?" : "¿Cómo se mueve el periodo?"}
+          channel={data.byDay[0]?.sales !== undefined ? "mips" : channel}
+        >
           {data.byDay[0]?.sales !== undefined ? (
             <SimpleLine
               compact
@@ -456,6 +495,7 @@ function ReportBody({ id, data }: { id: ReportId; data: ReportPayload }) {
               x="day"
               y="ventas"
               yLabel="Ventas MXN"
+              channel="mips"
             />
           ) : (
             <SimpleBar
@@ -463,6 +503,8 @@ function ReportBody({ id, data }: { id: ReportId; data: ReportPayload }) {
               data={data.byDay.map((d) => ({ ...d, day: d.day.slice(5) }))}
               x="day"
               y={data.byDay[0]?.reservations !== undefined ? "reservations" : "orders"}
+              yLabel={data.byDay[0]?.reservations !== undefined ? "Reservaciones" : "Pedidos"}
+              channel={channel}
             />
           )}
         </ChartCard>
@@ -471,93 +513,69 @@ function ReportBody({ id, data }: { id: ReportId; data: ReportPayload }) {
       {(id === "uber" || id === "productos") && data.topProducts && (
         <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
           <h2 className="font-serif text-lg">Qué se vende</h2>
-          <DataTable>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Producto</TableHead>
-                <TableHead>Ventas</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.topProducts.slice(0, 6).map((p) => (
-                <TableRow key={p.name}>
-                  <TableCell>{p.name}</TableCell>
-                  <TableCell className="tabular">{mxn(p.sales)}</TableCell>
-                  <TableCell>
-                    <TrendIndicator value={p.growthPct} className="text-xs" />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </DataTable>
+          <ShareBars
+            className="mt-3"
+            channel="uber"
+            items={data.topProducts.slice(0, 6).map((p) => ({ label: p.name, value: p.sales }))}
+            format={mxn}
+          />
           {data.pareto && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              El {Math.round(data.pareto.share * 100)}% de la venta sale de {data.pareto.topCount} productos.
+            <p className="mt-3 font-serif text-2xl tabular leading-none">
+              {Math.round(data.pareto.share * 100)}%
+              <span className="ml-2 align-middle text-xs font-sans font-normal text-muted-foreground">
+                de la venta sale de {data.pareto.topCount} productos.
+              </span>
             </p>
           )}
+          <div className="mt-3">
+            <DataTable>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Producto</TableHead>
+                  <TableHead>Ventas</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.topProducts.slice(0, 6).map((p) => (
+                  <TableRow key={p.name}>
+                    <TableCell>{p.name}</TableCell>
+                    <TableCell className="tabular">{mxn(p.sales)}</TableCell>
+                    <TableCell>
+                      <TrendIndicator value={p.growthPct} className="text-xs" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </DataTable>
+          </div>
         </section>
       )}
 
       {id === "whatsapp" && data.intents && (
-        <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
-          <h2 className="font-serif text-lg">Por qué escriben</h2>
-          <ul className="mt-2 space-y-1.5 text-sm">
-            {data.intents.slice(0, 6).map((i) => (
-              <li key={i.intent} className="flex justify-between gap-3">
-                <span>{INTENT[i.intent] ?? i.intent}</span>
-                <span className="tabular text-muted-foreground">{num(i.count)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ChartCard title="Por qué escriben" channel="whatsapp">
+          <SimpleDonut
+            compact
+            channel="whatsapp"
+            data={data.intents.slice(0, 6).map((i) => ({ name: INTENT[i.intent] ?? i.intent, value: i.count }))}
+            nameKey="name"
+            valueKey="value"
+            center={{
+              value: num(data.intents.reduce((s, i) => s + i.count, 0)),
+              label: "Motivos",
+            }}
+          />
+        </ChartCard>
       )}
 
       {id === "opentable" && data.states && (
-        <section className="rounded-lg border bg-card px-4 py-3.5 shadow-soft">
-          <h2 className="font-serif text-lg">Cómo cerró la mesa</h2>
-          <ul className="mt-2 space-y-1.5 text-sm">
-            {data.states.map((s) => (
-              <li key={s.status} className="flex justify-between">
-                <span>{STATE[s.status] ?? s.status}</span>
-                <span className="tabular">{num(s.count)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ChartCard title="Cómo cerró la mesa" channel="opentable">
+          <ShareBars
+            channel="opentable"
+            items={data.states.map((s) => ({ label: STATE[s.status] ?? s.status, value: s.count }))}
+          />
+        </ChartCard>
       )}
     </>
-  );
-}
-
-function EventTable({
-  rows,
-}: {
-  rows: Array<{ id: string; channel: string; externalId: string; eventStatus: string; mipsFolio: string | null }>;
-}) {
-  if (!rows.length) return <p className="mt-2 text-sm text-muted-foreground">No hay movimientos para listar.</p>;
-  return (
-    <DataTable>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Canal</TableHead>
-          <TableHead>ID del pedido</TableHead>
-          <TableHead>Estado</TableHead>
-          <TableHead>Folio Míps</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((e) => (
-          <TableRow key={e.id}>
-            <TableCell>
-              <ChannelBadge channel={e.channel} />
-            </TableCell>
-            <TableCell className="tabular">{e.externalId}</TableCell>
-            <TableCell>{STATE[e.eventStatus] ?? e.eventStatus}</TableCell>
-            <TableCell className="tabular">{e.mipsFolio ?? "—"}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </DataTable>
   );
 }

@@ -1,20 +1,17 @@
+import { eveningOpportunity } from "./demand";
+import { productOpportunity } from "./products";
 import type { Insight } from "../../shared/types";
-import { demandHeatmap, opentableSummary, uberSummary, whatsappSummary, customersSummary, hubHealth } from "../aggregations";
+import { demandHeatmap, uberSummary, whatsappSummary, customersSummary, hubHealth } from "../aggregations";
 import type { PeriodRange } from "../period";
 
 const DAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
-function hourRange(h: number) {
-  return `${String(h).padStart(2, "0")}:00 y ${String(h + 2).padStart(2, "0")}:00`;
-}
-
-export async function buildInsights(period: PeriodRange): Promise<{ insights: Insight[]; subtitle: string }> {
-  const [heat, uber, _ot, wa, cust, health] = await Promise.all([
+export async function buildInsights(period: PeriodRange, limit = 5): Promise<{ insights: Insight[]; subtitle: string }> {
+  const [heat, uber, wa, cust, health] = await Promise.all([
     demandHeatmap(period),
     uberSummary(period),
-    opentableSummary(period),
     whatsappSummary(period),
-    customersSummary(period),
+    customersSummary(),
     hubHealth(),
   ]);
 
@@ -44,46 +41,13 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     });
   }
 
-  const angus = uber.topProducts.find((p) => p.name.toLowerCase().includes("angus"));
   const avgTicket = uber.kpis.find((k) => k.label === "Ticket promedio")?.value ?? 0;
-  if (angus && avgTicket) {
-    const lift = avgTicket ? ((angus.ticket - avgTicket) / avgTicket) * 100 : 0;
-    insights.push({
-      id: "angus-star",
-      type: "producto",
-      channel: "uber_eats",
-      priority: "opportunity",
-      title: "Producto estrella",
-      description: `La hamburguesa Angus es de los productos más solicitados en Uber Eats y genera un ticket ${Math.round(lift)}% ${lift >= 0 ? "superior" : "inferior"} al promedio.`,
-      metric: angus.name,
-      comparison: `Ticket asociado ${angus.ticket}`,
-      impact: "Mayor ticket digital",
-      recommendedAction: "Destacar el producto en canales digitales.",
-      ctaLabel: "Ver producto",
-      deepLink: "/ventas?focus=productos",
-    });
-  }
-
-  const rib = uber.topProducts.find((p) => p.name.toLowerCase().includes("rib eye"));
-  if (rib) {
-    insights.push({
-      id: "ribeye-freq",
-      type: "producto",
-      channel: "uber_eats",
-      priority: "opportunity",
-      title: "Producto de alto ticket",
-      description: `El rib eye tiene un ticket asociado alto (${rib.ticket}) con menor frecuencia (${rib.quantity} unidades).`,
-      metric: rib.name,
-      impact: "Oportunidad de campaña a clientes de alto valor",
-      recommendedAction: "Probar una comunicación orientada a clientes de alto valor.",
-      ctaLabel: "Ver producto",
-      deepLink: "/marketing",
-    });
-  }
+  const product = productOpportunity(uber.topProducts, avgTicket);
+  if (product) insights.push(product);
 
   const resIntent = wa.intents.find((i) => i.intent === "reservaciones");
   const waTotal = wa.intents.reduce((s, i) => s + i.count, 0);
-  const resPct = waTotal ? resIntent!.count / waTotal : 0;
+  const resPct = waTotal ? (resIntent?.count ?? 0) / waTotal : 0;
   if (resIntent && resPct > 0.3) {
     insights.push({
       id: "wa-reservations",
@@ -117,23 +81,15 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
     });
   }
 
-  const thu = heat.cells.filter((c) => c.dow === 4 && c.hour >= 18 && c.hour < 20);
-  const thuTotal = thu.reduce((s, c) => s + c.total, 0);
-  const avgSlot =
-    heat.cells.filter((c) => c.hour >= 18 && c.hour < 20).reduce((s, c) => s + c.total, 0) / 7;
-  if (avgSlot && thuTotal < avgSlot * 0.75) {
-    const drop = Math.round((1 - thuTotal / avgSlot) * 100);
+  const evening = eveningOpportunity(heat.cells, period);
+  if (evening) {
     insights.push({
-      id: "thursday-gap",
-      type: "horario",
-      channel: "hub",
-      priority: "opportunity",
-      title: "Horario con menor demanda",
-      description: `Los jueves de 18:00 a 20:00 tienen ${drop}% menos demanda digital que el promedio de esa misma ventana.`,
-      metric: `-${drop}%`,
-      recommendedAction: "Evaluar promoción o experiencia específica para ese horario.",
-      ctaLabel: "Ver horario",
-      deepLink: "/marketing",
+      id: `evening-gap-${evening.dow}`, type: "horario", channel: "hub", priority: "opportunity",
+      title: "Horario con menor actividad por jornada",
+      description: `Los ${DAYS[evening.dow]} de 18:00 a 20:00 tienen ${evening.drop}% menos actividad por jornada que el promedio de esa ventana. Se normalizó por la exposición de cada día en el periodo.`,
+      metric: `-${evening.drop}%`, comparison: "Mínimo dos ventanas por día de semana y 30 eventos en total",
+      recommendedAction: "Revisar apertura y capacidad antes de probar una promoción; actividad no equivale a ventas.",
+      ctaLabel: "Ver horario", deepLink: "/inicio?focus=heatmap",
     });
   }
 
@@ -145,7 +101,7 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
       channel: "hub",
       priority: "opportunity",
       title: "Reactivación",
-      description: `${inactivos} clientes identificables no han regresado en más de 45 días.`,
+      description: `En el historial acumulado, ${inactivos} clientes están clasificados como inactivos. Esta audiencia no depende del periodo seleccionado.`,
       metric: String(inactivos),
       recommendedAction: "Crear audiencia de reactivación (requiere consentimiento).",
       ctaLabel: "Ver clientes",
@@ -168,16 +124,17 @@ export async function buildInsights(period: PeriodRange): Promise<{ insights: In
   }
 
   const peakDay = DAYS[heat.peak.dow] ?? "fin de semana";
-  const digitalUp = (uber.kpis[0]?.deltaPct ?? 0) > 0;
-  const subtitle = `En los últimos ${period.label.toLowerCase()} ${digitalUp ? "aumentaron" : "se movieron"} los pedidos digitales, OpenTable concentró la mayor demanda los ${peakDay} y Uber Eats tuvo su mejor desempeño alrededor de las ${String(heat.peak.hour).padStart(2, "0")}:00. Tu mayor concentración digital ocurre los ${peakDay} entre ${hourRange(heat.peak.hour)}.`;
+  const subtitle = heat.peak.total > 0
+    ? `En el periodo ${period.label.toLowerCase()}, la mayor actividad digital combinada ocurre los ${peakDay} entre ${String(heat.peak.hour).padStart(2, "0")}:00 y ${String(heat.peak.hour + 1).padStart(2, "0")}:00. Esta señal combina pedidos, reservaciones y conversaciones; no equivale a ventas.`
+    : "No hay actividad digital en el periodo seleccionado.";
 
   const order: Record<string, number> = { critical: 0, attention: 1, opportunity: 2, info: 3 };
   insights.sort((a, b) => order[a.priority]! - order[b.priority]!);
-  return { insights: insights.slice(0, 5), subtitle };
+  return { insights: insights.slice(0, limit), subtitle };
 }
 
 export async function marketingOpportunities(period: PeriodRange) {
-  const { insights } = await buildInsights(period);
+  const { insights } = await buildInsights(period, Infinity);
   return {
     disclaimer: "Activación de campañas requiere consentimiento y configuración adicional.",
     opportunities: insights

@@ -202,6 +202,7 @@ export const whatsappMessages = pgTable(
     sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     readAt: timestamp("read_at", { withTimezone: true }),
+    repliedAt: timestamp("replied_at", { withTimezone: true }),
     bodyPreview: text("body_preview"),
   },
   (t) => [index("wa_msg_conversation_idx").on(t.conversationId)],
@@ -307,3 +308,25 @@ export type Reservation = typeof reservations.$inferSelect;
 export type WhatsappConversation = typeof whatsappConversations.$inferSelect;
 export type IntegrationEvent = typeof integrationEvents.$inferSelect;
 export type Incident = typeof incidents.$inferSelect;
+
+export const authSessions = pgTable("auth_sessions", {
+  tokenHash: varchar("token_hash", { length: 64 }).primaryKey(),
+  userId: varchar("user_id", { length: 64 }).notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+export const connectorHealth = pgTable("connector_health", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 64 }).notNull().references(() => restaurants.id),
+  channel: text("channel").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  status: text("status").notNull(),
+  message: text("message").notNull(),
+});
+export const conversationStages = pgTable("conversation_stages", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  restaurantId: varchar("restaurant_id", { length: 64 }).notNull().references(() => restaurants.id),
+  conversationId: varchar("conversation_id", { length: 64 }).notNull().references(() => whatsappConversations.id),
+  stage: text("stage").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  targetId: varchar("target_id", { length: 64 }),
+});

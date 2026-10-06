@@ -1,30 +1,20 @@
 import { Link } from "react-router-dom";
 import type { Insight } from "@shared/types";
-import { Badge } from "@/components/ui/badge";
+import { PriorityHeader, type PriorityTone } from "@/components/priority-card";
+import { channelForInsight } from "@/lib/channel-config";
 
-const tone: Record<string, "copper" | "warning" | "danger" | "success"> = {
-  opportunity: "copper",
-  attention: "warning",
-  critical: "danger",
-  info: "success",
-};
-
-const category: Record<string, string> = {
-  horario: "Oportunidad",
-  producto: "Producto",
-  atencion: "Atención",
-  riesgo: "Riesgo",
-  recurrencia: "Recurrencia",
-  demanda: "Demanda",
+const TONE: Record<string, PriorityTone> = {
+  opportunity: "opportunity",
+  attention: "attention",
+  critical: "critical",
+  info: "info",
 };
 
 export function InsightCard({ insight }: { insight: Insight }) {
   return (
     <article className="border-b border-border py-5 last:border-b-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={tone[insight.priority] ?? "neutral"}>{category[insight.type] ?? insight.type}</Badge>
-        {insight.impact && <span className="text-xs text-muted-foreground">{insight.impact}</span>}
-      </div>
+      <PriorityHeader tone={TONE[insight.priority] ?? "info"} channel={channelForInsight(insight)} />
+      {insight.impact && <p className="mt-1 text-xs text-muted-foreground">{insight.impact}</p>}
       <h3 className="mt-2 font-serif text-lg">{insight.title}</h3>
       <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">{insight.description}</p>
       <Link
